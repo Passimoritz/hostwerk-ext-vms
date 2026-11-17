@@ -26,13 +26,14 @@ class Switch {
     this.macs = new Map(); // MAC (hex) → port it was last seen on
     this.stats = { frames: 0, dropped: 0 };
   }
-  open() {
-    if (this.sock) return Promise.resolve(this.port);
+  /** want: a fixed port – after an update of the extension QEMU still sends to the port of the old switch. */
+  open(want = 0) {
+    if (this.sock) return want && want !== this.port ? Promise.reject(Object.assign(new Error('switch already open on another port'), { port: this.port })) : Promise.resolve(this.port);
     return new Promise((resolve, reject) => {
       const s = dgram.createSocket({ type: 'udp4', reuseAddr: false });
-      s.once('error', reject);
-      s.bind({ address: LOOPBACK, port: 0, exclusive: true }, () => {
-        s.removeListener('error', reject);
+      s.once('error', (e) => { try { s.close(); } catch { /* egal */ } reject(e); });
+      s.bind({ address: LOOPBACK, port: Number(want) || 0, exclusive: true }, () => {
+        s.removeAllListeners('error');
         s.on('error', () => {}); // a VM that just stopped (ICMP port unreachable) must not end the switch
         s.on('message', (buf, rinfo) => this.onFrame(buf, rinfo));
         this.sock = s; this.port = s.address().port;
@@ -60,11 +61,12 @@ class Switch {
 
 class Switches {
   constructor() { this.nets = new Map(); }
-  /** A NIC (its UDP port) joins network `id` → the switch's port (opened on first use). */
-  async attach(id, nicPort) {
+  /** A NIC (its UDP port) joins network `id` → the switch's port (opened on first use; on `want` when taking over). */
+  async attach(id, nicPort, want = 0) {
     let sw = this.nets.get(id);
     if (!sw) { sw = new Switch(id); this.nets.set(id, sw); }
-    const port = await sw.open();
+    let port;
+    try { port = await sw.open(want); } catch (e) { if (!sw.members.size) this.nets.delete(id); throw e; }
     sw.members.add(Number(nicPort));
     return port;
   }

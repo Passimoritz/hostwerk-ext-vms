@@ -107,10 +107,8 @@ class Runtime {
       this.rebootByRestart = !arm && rebootByRestart(this.vm, info.accelArgs);
       this.restartPending = false;
       this.proc = (this.registry && this.registry.get(this.procId)) || this.proc || new this.Proc(this.procId, this.vm.name);
-      this.proc.name = this.vm.name;
-      this.proc.restartFn = this.vm.autoRestart ? () => this.start() : null;
-      this.proc.stopFn = () => this.shutdown({ timeout: 45000 }); // Hostwerk quits: shut the guest down cleanly
-      this.proc.onExit = () => this.onQemuExit();
+      this.detached = false;
+      this.hookProc();
       this.paused = false;
       try { fs.rmSync(path.join(this.dir, 'qemu.pid'), { force: true }); } catch { /* egal */ }
       await this.proc.start({
@@ -132,6 +130,7 @@ class Runtime {
     } finally {
       if (keyFile) U.removeSecretFile(keyFile); // QMP answers only after QEMU opened the disks
     }
+    this.saveRunState();
     this.connectSerial();
     // Windows installer from CD: "Press any key to boot from CD or DVD …" – press Enter for a few seconds. Not after a
     // restart of the guest: Setup goes on from the disk there, a key press would start the installer from the CD again.
@@ -175,7 +174,75 @@ class Runtime {
       .finally(() => { this.restarting = false; this.restartTask = null; this.onChange('restarted'); });
   }
 
+  /*
+   * Updates of the extension must not stop running VMs (1.0.3). QEMU runs as a process of Hostwerk's process registry,
+   * which outlives the extension: on an update the old instance only lets go (detach), the new one takes the running
+   * QEMU over (adopt) from run.json – ports, accelerator, internal networks. When Hostwerk itself quits, Hostwerk calls
+   * stopFn of every process: the guest is shut down cleanly (or powered off, if the VM is set to that).
+   */
+  hookProc() {
+    this.proc.name = this.vm.name;
+    this.proc.restartFn = this.vm.autoRestart ? () => this.start() : null;
+    this.proc.stopFn = () => (this.vm.onExit === 'kill' ? this.powerOff() : this.shutdown({ timeout: 45000 }));
+    this.proc.onExit = () => this.onQemuExit();
+  }
+  get runFile() { return path.join(this.dir, 'run.json'); }
+  saveRunState() {
+    try { fs.writeFileSync(this.runFile, JSON.stringify({ pid: (this.proc && this.proc.info().pid) || null, ports: this.ports, accel: this.accel, rebootByRestart: !!this.rebootByRestart, nets: this.nets, at: Date.now() })); } catch { /* only for a later takeover */ }
+  }
+  /** A QEMU of this VM still runs (Hostwerk's process registry) – take it over. → true when taken over */
+  async adopt() {
+    const p = this.registry && this.registry.get(this.procId);
+    if (!p || !p.isRunning() || this.isRunning()) return false;
+    let st = null;
+    try { st = JSON.parse(fs.readFileSync(this.runFile, 'utf8')); } catch { return false; }
+    if (!st || !st.ports || !st.ports.qmp) return false;
+    this.proc = p; this.ports = st.ports; this.accel = st.accel || null; this.rebootByRestart = !!st.rebootByRestart;
+    this.restartPending = false; this.restarting = false; this.detached = false;
+    for (const k of ['qmp', 'qga', 'serial', 'vnc']) if (this.ports[k]) usedPorts.add(this.ports[k]);
+    this.hookProc();
+    // Internal networks: this instance's switch is new – it opens on the port QEMU sends to (the old one lets go first)
+    this.nets = [];
+    for (const n of st.nets || []) {
+      if (!this.switches) break;
+      for (let i = 0; i < 40; i++) {
+        try { await this.switches.attach(n.net, n.local, n.remote); this.nets.push(n); break; } catch (e) {
+          if (i === 39) p.log(`Internal network ${n.net}: ${e.message}`, 'sys'); else await new Promise((r) => setTimeout(r, 250));
+        }
+      }
+    }
+    // QMP and the serial console take one client each – they become free as soon as the old instance has let go
+    const q = new Qmp({ port: this.ports.qmp });
+    await q.connect(20000);
+    this.qmp = q;
+    q.on('event', (e) => this.onEvent(e));
+    q.on('close', () => { if (this.qmp === q) this.qmp = null; });
+    const s = await q.exec('query-status').catch(() => null);
+    this.paused = !!(s && s.status === 'paused');
+    this.connectSerial();
+    this.pollAgent(true);
+    this.onChange('adopted');
+    return true;
+  }
+  /** The extension is updated or switched off: let go of QEMU without stopping it. */
+  detach() {
+    this.detached = true;
+    clearTimeout(this.agentTimer);
+    // the new instance hooks itself in; until then (or when Hostwerk quits right away) only run.json is cleaned up
+    if (this.proc) { const f = this.runFile; this.proc.onExit = () => { try { fs.rmSync(f, { force: true }); } catch { /* egal */ } }; this.proc.restartFn = null; }
+    if (this.qmp) { this.qmp.close(); this.qmp = null; }
+    if (this.serial.sock) { try { this.serial.sock.destroy(); } catch { /* egal */ } this.serial.sock = null; }
+    this.nets = []; // the switches close with this instance; the new one opens them on the same ports
+  }
+  /** QMP again after a detach (e.g. Hostwerk quits right after the extension let go) – for shutdown and power-off. */
+  async ensureQmp() {
+    if (this.qmp || !this.ports || !this.ports.qmp || !this.isRunning()) return;
+    const q = new Qmp({ port: this.ports.qmp });
+    try { await q.connect(3000); this.qmp = q; q.on('close', () => { if (this.qmp === q) this.qmp = null; }); } catch { /* hard stop after the timeout */ }
+  }
+
   cleanup() {
+    try { fs.rmSync(this.runFile, { force: true }); } catch { /* egal */ }
     this.detachNets();
     if (this.qmp) { this.qmp.close(); this.qmp = null; }
     if (this.serial.sock) { try { this.serial.sock.destroy(); } catch { /* egal */ } this.serial.sock = null; }
@@ -190,6 +257,7 @@ class Runtime {
   /** Clean shutdown: ACPI power button (and the guest agent, if it runs), hard stop after `timeout`. */
   async shutdown({ timeout = 90000 } = {}) {
     if (!this.isRunning()) return;
+    await this.ensureQmp();
     await this.proc.stop({
       timeout,
       graceful: async () => {
@@ -202,6 +270,7 @@ class Runtime {
   /** Like pulling the plug – data the guest has not written yet is lost. */
   async powerOff() {
     if (!this.isRunning()) return;
+    await this.ensureQmp();
     await this.proc.stop({ timeout: 5000, graceful: async () => { if (this.qmp) await this.qmp.exec('quit').catch(() => {}); } });
   }
   async pause() { await this.needQmp().exec('stop'); this.paused = true; this.onChange('paused'); }
@@ -300,7 +369,7 @@ class Runtime {
   /** Guest agent: is it there, which OS, which IP addresses. Polled after the start and then every 30 s. */
   async pollAgent(first = false) {
     clearTimeout(this.agentTimer);
-    if (!this.isRunning() || !this.ports) return;
+    if (this.detached || !this.isRunning() || !this.ports) return;
     try {
       const port = this.ports.qga;
       await agent({ port }, 'guest-ping', null, 3000);
@@ -322,6 +391,7 @@ class Runtime {
       this.agentInfo = { ok: false, at: Date.now() };
     }
     const delay = this.agentInfo.ok ? 30000 : first || Date.now() - (this.proc.startedAt || 0) < 600000 ? 5000 : 60000;
+    if (this.detached) return;
     this.agentTimer = setTimeout(() => this.pollAgent(), delay);
     if (this.agentTimer.unref) this.agentTimer.unref();
   }
@@ -438,14 +508,14 @@ class Runtime {
 
   /* ---------- Serial console ---------- */
   connectSerial(tries = 0) {
-    if (!this.isRunning() || !this.ports || this.serial.sock) return;
+    if (this.detached || !this.isRunning() || !this.ports || this.serial.sock) return;
     const s = net.connect({ port: this.ports.serial, host: '127.0.0.1' });
     s.on('connect', () => { this.serial.sock = s; });
     s.on('data', (d) => this.appendSerial(d.toString('utf8')));
     s.on('error', () => {});
     s.on('close', () => {
       if (this.serial.sock === s) this.serial.sock = null;
-      if (this.isRunning() && tries < 40) { const t = setTimeout(() => this.connectSerial(tries + 1), 1000); if (t.unref) t.unref(); }
+      if (!this.detached && this.isRunning() && tries < 40) { const t = setTimeout(() => this.connectSerial(tries + 1), 1000); if (t.unref) t.unref(); }
     });
   }
   appendSerial(text) {

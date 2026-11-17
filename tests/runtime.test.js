@@ -235,3 +235,66 @@ test('runtime: refuses to start with a busy forwarded port or a missing disk', a
   await assert.rejects(new Runtime(vm2, { qhost, Proc: FakeProc, registry, dir }).start(), (e) => e.status === 404 && /gone\.qcow2/.test(e.message));
   await assert.rejects(new Runtime(vm2, { qhost: { info: async () => ({ installed: false }) }, Proc: FakeProc, registry, dir }).start(), (e) => e.code === 'NO_QEMU');
 });
+
+/* ---------------- 1.0.3: an update of the extension does not stop running VMs ---------------- */
+const keepVm = (id, extra = {}) => ({ ...S.cleanVm({ name: id, id, disks: [{ id: 'disk0', file: 'disk0.qcow2' }], net: { forwards: [] }, ...extra }, { host: { cpus: 8, memoryMb: 16384 } }), id });
+const keepHost = { info: async () => ({ installed: true, system: 'qemu-system-x86_64', accel: 'whpx', accelArgs: ['whpx', 'tcg'], firmware: null }) };
+
+test('update: the old instance lets go, QEMU keeps running, the new one takes it over; Hostwerk quitting shuts it down cleanly', async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'disk0.qcow2'), 'x');
+  const vm = keepVm('keep');
+  const { FakeProc, registry } = makeProc();
+  const old = new Runtime(vm, { qhost: keepHost, Proc: FakeProc, registry, dir, portBase: 47960 });
+  await old.start();
+  const proc = registry.get('vm-keep');
+  assert.ok(fs.existsSync(path.join(dir, 'run.json')), 'run.json for a later takeover');
+  // the extension is updated: the shutdown hook only lets go
+  old.detach();
+  assert.equal(proc.isRunning(), true, 'QEMU keeps running');
+  assert.equal(typeof proc.onExit, 'function'); assert.equal(proc.restartFn, null); assert.equal(old.qmp, null); // onExit of the let-go instance only tidies run.json
+  // the new instance of the extension
+  const changes = [];
+  const neu = new Runtime(vm, { qhost: keepHost, Proc: FakeProc, registry, dir, onChange: (w) => changes.push(w) });
+  assert.equal(await neu.adopt(), true);
+  assert.equal(neu.status().state, 'running');
+  assert.deepEqual(neu.ports, old.ports); assert.equal(neu.status().accel, 'whpx');
+  assert.ok(changes.includes('adopted'));
+  await neu.pause(); assert.equal(neu.status().state, 'paused');
+  await neu.resume(); assert.equal(neu.status().state, 'running');
+  assert.equal(await neu.adopt(), false, 'already running in this instance');
+  // Hostwerk quits: its process registry calls stopFn – a clean guest shutdown through the new instance
+  await proc.stopFn();
+  assert.equal(proc.isRunning(), false);
+  assert.ok(proc.qmp.log.some((m) => m.execute === 'system_powerdown'));
+  assert.ok(!fs.existsSync(path.join(dir, 'run.json')), 'run.json removed when QEMU ended');
+  // nothing running → nothing to take over
+  assert.equal(await new Runtime(vm, { qhost: keepHost, Proc: FakeProc, registry, dir }).adopt(), false);
+});
+
+test('update: "power off when Hostwerk quits" holds even after letting go (QMP is connected again for it)', async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'disk0.qcow2'), 'x');
+  const { FakeProc, registry } = makeProc();
+  const rt = new Runtime(keepVm('hard', { onExit: 'kill' }), { qhost: keepHost, Proc: FakeProc, registry, dir, portBase: 47980 });
+  await rt.start();
+  const proc = registry.get('vm-hard');
+  rt.detach(); // extension switched off, Hostwerk quits afterwards
+  await proc.stopFn();
+  assert.equal(proc.isRunning(), false);
+  assert.ok(proc.qmp.log.some((m) => m.execute === 'quit') && !proc.qmp.log.some((m) => m.execute === 'system_powerdown'));
+});
+
+test('internal networks: a new switch opens on the port QEMU still sends to – not while the old one holds it', async () => {
+  const { Switches } = require('../server/netswitch');
+  const a = new Switches();
+  const port = await a.attach('lan', 40001);
+  const b = new Switches();
+  await assert.rejects(b.attach('lan', 40001, port), /EADDRINUSE|address/i);
+  assert.equal(b.info('lan'), null, 'no half-open switch left behind');
+  a.closeAll();
+  assert.equal(await b.attach('lan', 40001, port), port);
+  assert.equal(await b.attach('lan', 40002, port), port, 'a second VM in the same network');
+  await assert.rejects(b.attach('lan', 40003, port + 1), /already open/);
+  b.closeAll();
+});

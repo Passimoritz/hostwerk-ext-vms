@@ -1460,6 +1460,16 @@ class VmManager {
       await U.sleep(1500);
     }
   }
+  /** After an update of the extension: take over the VMs whose QEMU kept running (Hostwerk's process registry). → ids */
+  async adoptRunning() {
+    const out = [];
+    await Promise.all([...this.vms.keys()].map(async (id) => {
+      try { if (await this.rt(id).adopt()) out.push(id); } catch (e) { console.warn(`[vms] ${id}: running VM not taken over – ${e.message}`); } // eslint-disable-line no-console
+    }));
+    return out;
+  }
+  /** The extension is updated or switched off: let go of every VM without stopping it (Hostwerk stops them when it quits). */
+  detachAll() { for (const r of this.runtimes.values()) if (r.isRunning()) r.detach(); }
   async stopAll() { await Promise.all([...this.runtimes.values()].filter((r) => r.isRunning()).map((r) => (r.vm.onExit === 'kill' ? r.powerOff() : r.shutdown({ timeout: 45000 })).catch(() => {}))); }
 }
 

@@ -78,7 +78,12 @@ exports.activate = (host) => {
   };
   if (!process.env.HW_TEST || process.env.HW_VMS_SCHEDULER === '1') m.startScheduler();
   host.on('autostart', () => (process.env.HW_TEST ? [] : [() => m.autostart()]));
-  host.on('shutdown', async () => { m.stopScheduler(); if (vncProxy) vncProxy.close(); await m.stopAll(); m.switches.closeAll(); await m.stopShareServer().catch(() => {}); });
+  // Runs when Hostwerk quits AND when the extension is updated or switched off. VMs are never stopped here: on an update
+  // the new instance takes them over (adoptRunning), and when Hostwerk quits it stops every process itself through its
+  // stopFn – a clean guest shutdown (or power-off, if the VM is set to that), with more time than this hook has.
+  host.on('shutdown', async () => { m.stopScheduler(); if (vncProxy) vncProxy.close(); m.detachAll(); m.switches.closeAll(); await m.stopShareServer().catch(() => {}); });
+  // VMs whose QEMU kept running through an update of this extension
+  m.adoptRunning().then((ids) => { if (ids.length) console.log(`[vms] took over running VMs: ${ids.join(', ')}`); }).catch(() => {}); // eslint-disable-line no-console
   exports.manager = m; // for tests and other extensions in the same process
 };
 

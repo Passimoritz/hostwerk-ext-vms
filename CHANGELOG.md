@@ -1,3 +1,7 @@
+## 1.0.3
+
+- Updates of the extension no longer stop running VMs: the old version lets go of QEMU, the new one takes it over within seconds (same process, same ports, the guest keeps running – screen, console, guest agent, VNC and internal networks carry on). Only when Hostwerk itself quits are the VMs shut down cleanly – now with Hostwerk's own time limit and the setting “power off” respected. Verified live: same QEMU process, guest uptime continues, clean power-down on quit. / Updates der Erweiterung stoppen laufende VMs nicht mehr – die neue Fassung übernimmt sie in Sekunden; nur beim Beenden von Hostwerk werden sie sauber heruntergefahren.
+
 ## 1.0.2
 
 - German everywhere: the sub-tab “Commands in the VM” was still English (its label comes from a list the translation scan does not see). / Überall Deutsch: der Unterreiter „Befehle in der VM“ war noch englisch.
