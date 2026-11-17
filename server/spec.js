@@ -125,7 +125,9 @@ function cleanVm(input, { prev = null, host = { cpus: 8, memoryMb: 16384 }, lanA
     disks: (Array.isArray(b.disks) ? b.disks : base.disks || []).map(cleanDisk),
     cdrom: b.cdrom !== undefined ? (b.cdrom ? String(b.cdrom) : null) : base.cdrom || null,
     seed: base.seed || null,
-    drivers: b.drivers !== undefined ? (b.drivers ? String(b.drivers) : null) : base.drivers || null, // virtio-win ISO (third CD)
+    // virtio-win ISO (third CD). Only a path counts: the create dialog sends `drivers: true/false` as the
+    // "add drivers" switch (also for Linux), which once ended up here as the file name "true".
+    drivers: driversPath(b.drivers !== undefined && typeof b.drivers !== 'boolean' ? b.drivers : base.drivers),
     install: base.install || null, // { state: 'running'|'done', startedAt, doneAt } while Windows installs itself
     snapshots: base.snapshots || {},
     currentSnapshot: base.currentSnapshot || null,
@@ -216,6 +218,11 @@ function cleanNets(list, vmId) {
 /* ---------------- Shared folders (#13) ---------------- */
 const SHARE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/;
 const MAX_SHARES = 4;
+function driversPath(v) {
+  const s = typeof v === 'string' ? v.trim() : '';
+  return s && s !== 'true' && s !== 'false' ? s : null;
+}
+
 function cleanShares(list) {
   const out = [];
   for (const x of (Array.isArray(list) ? list : []).slice(0, 16)) {

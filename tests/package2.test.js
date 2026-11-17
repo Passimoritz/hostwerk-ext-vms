@@ -215,3 +215,12 @@ test('#2 runtime presses Enter for "Press any key to boot from CD" while Windows
   await new Promise((res) => setTimeout(res, 1900));
   assert.ok(keys.length >= 2 && keys.length <= 4 && keys.every((k) => k === 'ret'), JSON.stringify(keys));
 });
+
+test('drivers switch from the create dialog is never taken as a file name', () => {
+  const lin = S.cleanVm({ name: 'k', osType: 'linux', drivers: true }, { host: HOST });
+  assert.strictEqual(lin.drivers, null);
+  const old = S.cleanVm({ name: 'k', osType: 'linux' }, { host: HOST, prev: { drivers: 'true' } });
+  assert.strictEqual(old.drivers, null);
+  const kept = S.cleanVm({ name: 'w', osType: 'windows', drivers: true }, { host: HOST, prev: { drivers: 'C:\virtio.iso' } });
+  assert.strictEqual(kept.drivers, 'C:\virtio.iso');
+});
