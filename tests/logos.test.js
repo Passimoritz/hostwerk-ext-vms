@@ -5,7 +5,9 @@ const assert = require('node:assert');
 const L = require('../server/logos');
 const { vmKind } = require('../server/kind');
 
-const slugs = (vm, hint) => L.logoSources(vm, hint).map((s) => s.url.replace(`${L.ICONS}/`, '').replace(/\.svg$/, ''));
+// no project files in these tests: the file check never finds anything (a Windows path is "." on Linux = this repository)
+const none = () => false;
+const slugs = (vm, hint) => L.logoSources(vm, hint, none).map((s) => s.url.replace(`${L.ICONS}/`, '').replace(/\.svg$/, ''));
 
 test('logos: system names become Simple Icons names, best guess first', () => {
   assert.equal(slugs({ osLabel: 'Debian 12 (Bookworm)' })[0], 'debian');
