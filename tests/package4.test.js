@@ -356,6 +356,7 @@ test('#15 encrypted VM: key sealed in vm.json, key file only while QEMU/qemu-img
   m.Proc = class { isRunning() { return false; } info() { return { state: 'stopped' }; } async start(o) { const f = o.args[o.args.indexOf('-object') + 1].match(/file=(.*)$/)[1]; seenKey = fs.readFileSync(f, 'utf8'); } log() {} };
   m.qhost.info = async () => ({ installed: true, accelArgs: ['tcg'], system: 'q' });
   const r = m.rt('safe'); r.applyLimits = async () => {}; r.pollAgent = () => {}; r.connectSerial = () => {};
+  r.checkForwards = async () => {}; // about keys, not ports – a real VM on this PC may hold the default SSH port 2222
   await r.start();
   assert.equal(seenKey, plain);
   assert.deepEqual(noKeyFiles(root), []);

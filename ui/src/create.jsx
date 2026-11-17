@@ -22,7 +22,7 @@ const SOURCES = [
 const APP_LOOK = { nginx: [Globe, '#16a34a'], docker: [Container, '#0ea5e9'], wordpress: [PenLine, '#2563eb'], nextcloud: [Cloud, '#0891b2'], gitea: [GitBranch, '#65a30d'], 'uptime-kuma': [Activity, '#10b981'] };
 const AppIco = ({ id }) => { const [I, c] = APP_LOOK[id] || [Terminal, '#64748b']; return <span className="engine-ico vm-app-ico" style={{ '--c': c }}><I size={16} aria-hidden="true" /></span>; };
 const EXAMPLE_COMMANDS = ['apt-get install -y htop', 'echo ready > /root/ready'].join('\n');
-const OS = [{ value: 'linux', label: 'Linux' }, { value: 'windows', label: 'Windows' }, { value: 'other', label: 'Other' }];
+const OS = [{ id: 'linux', label: 'Linux' }, { id: 'windows', label: 'Windows' }, { id: 'other', label: 'Other' }];
 
 export function CreateDialog({ onClose, engines, initial = {} }) {
   const { data: cat } = useApi('/vms/catalog', [], { live: false });
@@ -162,9 +162,9 @@ export function CreateDialog({ onClose, engines, initial = {} }) {
         )}
         <div className="grid grid-2">
           <Field label="Name"><input className="input" value={f.name} onChange={set('name')} placeholder={source === 'cloud' ? 'web-test' : 'Windows 11'} autoFocus /></Field>
-          {['iso', 'empty', 'disk'].includes(source) && <Field label="System"><Seg value={f.osType} onChange={set('osType')} options={arch === 'aarch64' ? OS.filter((o) => o.value !== 'windows') : OS} /></Field>}
-          {armOk && (['empty', 'disk'].includes(source) || (source === 'iso' && !f.image)) && <Field label="Processor" hint="ARM64 runs emulated – much slower than a PC VM."><Seg value={f.arch} onChange={(v) => setF((x) => ({ ...x, arch: v, osType: v === 'aarch64' && x.osType === 'windows' ? 'linux' : x.osType }))} options={[{ value: 'x86_64', label: t('PC (x86-64)') }, { value: 'aarch64', label: 'ARM64' }]} /></Field>}
-          <Field label="Keyboard layout" hint={source === 'cloud' ? 'Set in the VM, too.' : 'Used when Hostwerk types text into the VM.'}><Seg value={f.keyboard} onChange={set('keyboard')} options={[{ value: 'de', label: t('German') }, { value: 'us', label: t('English (US)') }]} /></Field>
+          {['iso', 'empty', 'disk'].includes(source) && <Field label="System"><Seg value={f.osType} onChange={set('osType')} options={arch === 'aarch64' ? OS.filter((o) => o.id !== 'windows') : OS} /></Field>}
+          {armOk && (['empty', 'disk'].includes(source) || (source === 'iso' && !f.image)) && <Field label="Processor" hint="ARM64 runs emulated – much slower than a PC VM."><Seg value={f.arch} onChange={(v) => setF((x) => ({ ...x, arch: v, osType: v === 'aarch64' && x.osType === 'windows' ? 'linux' : x.osType }))} options={[{ id: 'x86_64', label: t('PC (x86-64)') }, { id: 'aarch64', label: 'ARM64' }]} /></Field>}
+          <Field label="Keyboard layout" hint={source === 'cloud' ? 'Set in the VM, too.' : 'Used when Hostwerk types text into the VM.'}><Seg value={f.keyboard} onChange={set('keyboard')} options={[{ id: 'de', label: t('German') }, { id: 'us', label: t('English (US)') }]} /></Field>
         </div>
         {source === 'cloud' && (
           <div className="grid grid-2">

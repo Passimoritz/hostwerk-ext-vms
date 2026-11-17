@@ -1,4 +1,5 @@
-import { Monitor, Server, AppWindow, Box } from 'lucide-react';
+import { Monitor, Server, AppWindow, Box, Layers } from 'lucide-react';
+import { SvcImage } from '@hostwerk/kit';
 import { fmtBytes } from '@hostwerk/api';
 import { toast } from '@hostwerk/ui';
 import { t } from '@hostwerk/i18n';
@@ -21,6 +22,52 @@ export const isOn = (s) => ['running', 'paused', 'starting', 'stopping'].include
 export function OsIcon({ vm, size = 18 }) {
   const Icon = vm.template ? Box : vm.osType === 'windows' ? AppWindow : vm.osType === 'linux' ? Server : Monitor;
   return <Icon size={size} aria-hidden="true" />;
+}
+
+/** Colour of a VM's icon tile – by system, like the brand colours in Hostwerk's "New" menu. */
+export function osColor(vm) {
+  if (vm.template) return '#10b981';
+  const label = String(vm.osLabel || '').toLowerCase();
+  if (vm.osType === 'windows') return '#0078d4';
+  if (/ubuntu/.test(label)) return '#e95420';
+  if (/debian/.test(label)) return '#d70a53';
+  if (/fedora/.test(label)) return '#3c6eb4';
+  if (/alma|rocky|centos|red hat/.test(label)) return '#0f4266';
+  if (/alpine/.test(label)) return '#0d597f';
+  if (vm.osType === 'linux') return '#f59e0b';
+  return '#64748b';
+}
+
+/**
+ * Logo of the VM's system through Hostwerk's icon service (kind "vm", sources from server/logos.js – found once,
+ * kept, changeable with the pencil like every service picture). Until one is found, or when there is none: the colour
+ * tile of the system. small = the 30 px icon of a page title. VirtualBox VMs: vboxUuid + their OS type as hint.
+ */
+export function VmLogo({ vm, vboxUuid, osType, small = false }) {
+  const c = vboxUuid ? '#2563eb' : osColor(vm);
+  const tile = (
+    <span className={`svc-icon${small ? ' vm-h1-icon' : ''}`} style={{ background: `linear-gradient(135deg, ${c}, ${c}aa)` }}>
+      {vboxUuid ? <Layers size={small ? 18 : 20} aria-hidden="true" /> : <OsIcon vm={vm} size={small ? 18 : 20} />}
+    </span>
+  );
+  return <SvcImage kind="vm" id={vboxUuid ? ["vbox", vboxUuid].join("-") : vm.id} hint={vboxUuid ? osType : undefined} size={small ? 30 : undefined} className={small ? 'ico' : 'svc-icon'} fallback={tile} />;
+}
+
+/** First IPv4 address the guest agent reports (not loopback) – null while the agent is quiet. */
+export function ipOf(vm) {
+  const a = vm.status && vm.status.agent;
+  const x = a && a.ok && (a.addresses || []).find((y) => y.type === 'ipv4' && !/^127\./.test(y.ip));
+  return x ? x.ip : null;
+}
+
+/** Breadcrumbs like Hostwerk's detail pages: Virtual machines / … / name. items: [[route|null, label], …] */
+export function Crumbs({ items }) {
+  return (
+    <div className="crumbs small" style={{ marginBottom: 6 }}>
+      <a href={BASE}>{t('Virtual machines')}</a>
+      {items.map(([route, label], i) => <span key={i} style={{ display: 'contents' }}><span>/</span>{route ? <a href={`${BASE}/${route}`}>{label}</a> : <span>{label}</span>}</span>)}
+    </div>
+  );
 }
 
 export const mem = (mb) => (mb >= 1024 ? `${Math.round(mb / 102.4) / 10} GB` : `${mb} MB`);

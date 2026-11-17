@@ -1,20 +1,10 @@
 /* Virtual machines – only Hostwerk's tokens (colours, steps), no own fonts. */
-.vm-toolbar { align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
-.vm-list { display: flex; flex-direction: column; gap: 2px; }
-.vm-list-empty { padding: var(--sp-2) var(--sp-3); }
-.vm-item { display: flex; align-items: center; gap: var(--sp-2); width: 100%; text-align: left; background: none; border: 0; color: inherit; cursor: pointer; }
-.vm-item > .grow { display: flex; flex-direction: column; min-width: 0; }
-.vm-item-name { font-weight: 600; }
 .vm-dot { width: 8px; height: 8px; border-radius: var(--r-pill); background: var(--line-2); flex: none; }
 .vm-dot.running { background: var(--ok); }
 .vm-dot.paused, .vm-dot.starting, .vm-dot.stopping, .vm-dot.saved { background: var(--warn); }
 .vm-dot.error { background: var(--err); }
 
-.vm-head { align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
-.vm-head-icon { display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center; border-radius: var(--r-lg); background: var(--accent-soft); color: var(--accent-text); flex: none; }
-.vm-title { margin: 0; font-size: var(--fs-xl); display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .vm-code { padding: var(--sp-1) var(--sp-2); background: var(--surface-2); border-radius: var(--r-sm); overflow-x: auto; white-space: nowrap; }
-.vm-more { flex-wrap: wrap; gap: var(--sp-2); }
 .vm-notes, .vm-key { width: 100%; resize: vertical; }
 
 .vm-screen-card { display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -47,8 +37,6 @@
 .vm-image { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-md); cursor: pointer; }
 .vm-image.on { border-color: var(--accent); background: var(--accent-soft); }
 .vm-image input { margin: 0; }
-.vm-welcome { padding: var(--sp-4); }
-.vm-why .card-body svg { color: var(--accent-text); }
 
 /* Package 5: app templates (#9), Ask AI about the screen (#20), Hyper-V (#21), ARM (#22) */
 .vm-apps { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow: auto; }
@@ -62,3 +50,15 @@
 .vm-ai-shot { max-width: 100%; max-height: 180px; border: 1px solid var(--line); border-radius: var(--r-md); align-self: flex-start; }
 .vm-app-card .vm-code { white-space: pre-wrap; max-height: 160px; overflow: auto; }
 .vm-app-ico { width: 30px; height: 30px; border-radius: var(--r-md); }
+
+/* Page layout like Hostwerk's web server and Minecraft pages */
+.vm-h1-icon { width: 30px; height: 30px; border-radius: var(--r-lg); display: inline-grid; vertical-align: middle; }
+.vm-h1-icon svg { width: 17px; height: 17px; }
+.vm-card { cursor: pointer; }
+.vm-card .svc-actions { flex-wrap: wrap; }
+.vm-section { margin: var(--sp-2) 0 0; font-size: var(--fs-md); display: flex; align-items: center; gap: var(--sp-2); }
+.vm-why { display: flex; gap: var(--sp-3); align-items: flex-start; }
+.vm-why .engine-ico { width: 34px; height: 34px; }
+.vm-screen-foot { flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.vm-tab-body { min-width: 0; }
+.vm-manage { flex-wrap: wrap; gap: var(--sp-2); }

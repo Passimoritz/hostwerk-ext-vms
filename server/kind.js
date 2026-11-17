@@ -19,6 +19,9 @@ function vmKind(m) {
     detail: (v) => [v.osLabel || null, `${v.cpus} CPU`, `${v.memoryMb >= 1024 ? `${Math.round(v.memoryMb / 102.4) / 10} GB` : `${v.memoryMb} MB`} RAM`].filter(Boolean).join(' · '),
     dir: (id) => m.dirOf(id),
     fileRoot: (v) => ({ path: m.dirOf(v.id) }),
+    // Logo of the system (Debian, Ubuntu, Windows …) for Hostwerk's icon service – derived, no list (logos.js).
+    // VirtualBox VMs come as "vbox-<uuid>" with their OS type as hint from the page.
+    iconSources: (id, hint) => { let vm = null; try { vm = /^vbox-/.test(id) ? null : m.get(id); } catch { vm = null; } return require('./logos').logoSources(vm, hint); },
     ports: (v) => ((v.net && v.net.forwards) || []).map((f) => ({ port: f.host, label: `${v.name}: ${f.label || f.guest}`, proto: f.proto.toUpperCase(), public: f.bind === 'lan' })),
     headline: () => {
       const all = m.list().filter((v) => !v.template);

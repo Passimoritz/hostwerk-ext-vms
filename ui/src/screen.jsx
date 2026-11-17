@@ -99,7 +99,7 @@ export function Screen({ vm, vbox = false, active = true }) {
           <Btn className="btn ghost xs" icon={Type} onClick={typeText}>Type text …</Btn>
           <Btn className="btn ghost xs" icon={Camera} onClick={shot} title="Save screenshot">Screenshot</Btn>
           <Btn className="btn ghost xs" icon={Maximize2} onClick={full} title="Full screen">Full screen</Btn>
-          {!vbox && <Seg value={fps} onChange={setFps} options={[{ value: 'slow', label: t('Saving') }, { value: 'normal', label: t('Normal') }, { value: 'fast', label: t('Smooth') }]} />}
+          {!vbox && <Seg value={fps} onChange={setFps} options={[{ id: 'slow', label: t('Saving') }, { id: 'normal', label: t('Normal') }, { id: 'fast', label: t('Smooth') }]} />}
         </div>
       </div>
       <div ref={wrap} className={`vm-screen ${captured ? 'captured' : ''}`}>

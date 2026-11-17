@@ -1,3 +1,9 @@
+## 1.0.1
+
+- Built like Hostwerk's web server and Minecraft pages: the VMs as service cards (state, hardware, address, snapshots, start/stop right on the card) with "Another VM", own tabs for VirtualBox, Hyper-V and settings; every VM on its own page with breadcrumbs, state and actions on the right and six tabs instead of eight (screen, serial console and commands together; snapshots and backups together); a calmer overview. / Aufgebaut wie Webserver und Minecraft in Hostwerk: VMs als Dienstkarten, eigene Reiter für VirtualBox, Hyper-V und Einstellungen, jede VM auf eigener Seite mit sechs statt acht Reitern und ruhigerer Übersicht.
+- Logos of the systems found by themselves – Debian, Ubuntu, Fedora, Alpine, Arch, macOS … from Simple Icons, Windows from microsoft.com, and for an own system the logo of its project (logo.svg, assets/logo.png … next to the ISO or above its build folder). Nothing to maintain; change it with the pencil like any service picture. / Logos der Systeme kommen von selbst – auch das eigene Logo eines selbstgebauten Systems aus seinem Projektordner; änderbar per Stift.
+- Fixed: every switch (screen, graphics, firmware, boot, keyboard, when Hostwerk quits …) showed no choice and did nothing on click; the hardware page offered “Save” without a change; “guest agent” note while the VM is off; VMs without a system name had no subtitle. / Behoben: alle Umschalter ohne Auswahl und Wirkung, „Speichern“ ohne Änderung, Gast-Agent-Hinweis bei ausgeschalteter VM, fehlender Untertitel.
+
 ## 1.0.0
 
 - First release. / Erste Fassung.
