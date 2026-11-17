@@ -986,5 +986,6 @@
   "Needed for Windows 11 and other UEFI systems.": "Nötig für Windows 11 und andere UEFI-Systeme.",
   "Forwards marked “home network” are then reachable by every device in your network.": "Mit „Heimnetz“ markierte Weiterleitungen sind dann für jedes Gerät in deinem Netz erreichbar.",
   "Copy, clone, template and export work while the VM is off.": "Kopieren, Klonen, Vorlage und Export gehen, solange die VM aus ist.",
-  "Other system": "Anderes System"
+  "Other system": "Anderes System",
+  "Commands in the VM": "Befehle in der VM"
 }
