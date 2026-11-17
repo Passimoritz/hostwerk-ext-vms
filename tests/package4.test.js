@@ -42,15 +42,18 @@ test('#7 spec: up to two internal networks, MAC fixed per VM and network, addres
   assert.equal(S.checkCidr('192.168.50.7/16'), '192.168.50.7/16');
 });
 
+/** An absolute folder on this platform (Windows drive path, else POSIX) – the share check uses path.isAbsolute. */
+const abs = (...p) => require('path').resolve('/', ...p); // C:\x on Windows, /x elsewhere
+
 test('#13/#14/#15 spec: shares checked, bridge needs a TAP adapter, encryption never from the interface', () => {
-  const vm = S.cleanVm({ name: 's', shares: [{ name: 'Projekte', path: 'C:\\Daten\\Projekte' }, { name: 'Musik', path: '/home/x/Musik', readOnly: false }] }, { host: HOST });
+  const vm = S.cleanVm({ name: 's', shares: [{ name: 'Projekte', path: abs('Daten', 'Projekte') }, { name: 'Musik', path: '/home/x/Musik', readOnly: false }] }, { host: HOST });
   assert.deepEqual(vm.shares.map((s) => [s.id, s.readOnly, s.auto, dav.TOKEN_RE.test(s.token)]), [['share0', true, true, true], ['share1', false, true, true]]);
   const again = S.cleanVm({ shares: vm.shares }, { prev: vm, host: HOST });
   assert.deepEqual(again.shares.map((s) => s.token), vm.shares.map((s) => s.token)); // tokens stay
   assert.throws(() => S.cleanVm({ name: 's', shares: [{ name: 'a', path: 'relative/x' }] }, { host: HOST }), /folder on this PC/);
-  assert.throws(() => S.cleanVm({ name: 's', shares: [{ name: 'a/b', path: 'C:\\x' }] }, { host: HOST }), /Share name/);
-  assert.throws(() => S.cleanVm({ name: 's', shares: [{ name: 'a', path: 'C:\\x' }, { name: 'A', path: 'C:\\y' }] }, { host: HOST }), /exists already/);
-  assert.throws(() => S.cleanVm({ name: 's', shares: Array.from({ length: 5 }, (_, i) => ({ name: `s${i}`, path: 'C:\\x' })) }, { host: HOST }), /At most 4/);
+  assert.throws(() => S.cleanVm({ name: 's', shares: [{ name: 'a/b', path: abs('x') }] }, { host: HOST }), /Share name/);
+  assert.throws(() => S.cleanVm({ name: 's', shares: [{ name: 'a', path: abs('x') }, { name: 'A', path: abs('y') }] }, { host: HOST }), /exists already/);
+  assert.throws(() => S.cleanVm({ name: 's', shares: Array.from({ length: 5 }, (_, i) => ({ name: `s${i}`, path: abs('x') })) }, { host: HOST }), /At most 4/);
   assert.throws(() => S.cleanVm({ name: 'b', net: { mode: 'bridge' } }, { host: HOST }), /TAP adapter/);
   const br = S.cleanVm({ name: 'b', net: { mode: 'bridge', tap: 'OpenVPN TAP-Windows6' } }, { host: HOST });
   assert.deepEqual([br.net.mode, br.net.tap], ['bridge', 'OpenVPN TAP-Windows6']);
