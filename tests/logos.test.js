@@ -46,6 +46,34 @@ test('logos: an own system (self-built ISO) takes the logo of its project – be
   assert.deepEqual(L.projectLogoFiles(null), []);
 });
 
+test('logos: a self-built distribution – version folder below output, freedesktop icon deep in the project', () => {
+  const path = require('path');
+  const proj = path.join(path.sep, 'p', 'my-os');
+  const iso = path.join(proj, 'output', 'v1.1.0-pre', 'my-os-20261118.iso');
+  const apps = path.join(proj, 'system_files', 'usr', 'share', 'icons', 'hicolor', 'scalable', 'apps');
+  const tree = {
+    [proj]: [{ name: 'Justfile' }, { name: 'system_files', dir: true }, { name: 'installer', dir: true }, { name: 'node_modules', dir: true }, { name: 'output', dir: true }],
+    [path.join(proj, 'system_files')]: [{ name: 'usr', dir: true }],
+    [path.join(proj, 'system_files', 'usr')]: [{ name: 'share', dir: true }],
+    [path.join(proj, 'system_files', 'usr', 'share')]: [{ name: 'icons', dir: true }],
+    [path.join(proj, 'system_files', 'usr', 'share', 'icons')]: [{ name: 'hicolor', dir: true }],
+    [path.join(proj, 'system_files', 'usr', 'share', 'icons', 'hicolor')]: [{ name: 'scalable', dir: true }],
+    [path.join(proj, 'system_files', 'usr', 'share', 'icons', 'hicolor', 'scalable')]: [{ name: 'apps', dir: true }],
+    [apps]: [{ name: 'my-control.svg' }, { name: 'my-logo.svg' }],
+    [path.join(proj, 'installer')]: [{ name: 'webui-header-logo.png' }],
+    [path.join(proj, 'node_modules')]: [{ name: 'logo.svg' }],
+  };
+  const exists = (f) => f === path.join(proj, 'Justfile');
+  const readdir = (d) => tree[d] || [];
+  const got = L.projectLogoFiles(iso, exists, readdir);
+  assert.equal(got[0], path.join(apps, 'my-logo.svg')); // named after the project, SVG
+  assert.ok(!got.some((f) => f.includes('node_modules')));
+  assert.ok(got.indexOf(path.join(proj, 'installer', 'webui-header-logo.png')) > 0, 'a header picture only after it');
+  // a folder with a README but no build folder below (Downloads) is never searched
+  const dl = path.join(path.sep, 'u', 'Downloads');
+  assert.deepEqual(L.projectLogoFiles(path.join(dl, 'x.iso'), (f) => f === path.join(dl, 'README.md'), () => [{ name: 'logo-of-something.svg' }]), []);
+});
+
 test('logos: the service kind "vm" hands them to Hostwerk (QEMU VMs by id, VirtualBox by hint)', () => {
   const vms = { web: { id: 'web', osLabel: 'Ubuntu 24.04 LTS' } };
   const k = vmKind({ get: (id) => { if (!vms[id]) throw new Error('unknown'); return vms[id]; } });

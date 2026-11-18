@@ -40,19 +40,66 @@ function systemText(vm) {
 
 /*
  * Own systems (a self-built OS, a company image): the logo lives in the project that built the ISO. Looked for next to
- * the ISO/disk and – when that is a build folder (output, build, dist …) – in the project folder above it. Only
- * logo-like names, so a random picture in a download folder is never taken.
+ * the ISO/disk and – going up through build and version folders (output, build, dist, v1.1.0-pre, 20261118 …) – in the
+ * project folder above. Only logo-like names, so a random picture in a download folder is never taken. In a real
+ * project folder (a git repository, or README/Justfile … above the build folder) also deeper, e.g. the freedesktop icon of a Linux distribution
+ * (system_files/usr/share/icons/hicolor/scalable/apps/<name>-logo.svg): a bounded search for "*logo*.svg|png",
+ * the one named after the project first.
  */
+const fs = require('fs');
 const LOGO_FILES = ['logo.svg', 'logo.png', 'icon.svg', 'icon.png', 'favicon.svg', 'favicon.png', 'favicon.ico',
   'assets/logo.svg', 'assets/logo.png', 'branding/logo.svg', 'branding/logo.png', 'docs/logo.svg', 'docs/logo.png', 'images/logo.svg', 'images/logo.png'];
 const BUILD_DIRS = /^(output|out|build|builds|dist|release|releases|iso|isos|images|artifacts|target)$/i;
-function projectLogoFiles(file, exists = require('fs').existsSync) {
+const VERSION_DIR = /^v?\d+([._-]\d+)*([._-][a-z0-9]+)*$/i; // v1.1.0-pre, 1.2, 20261118
+const MARKERS = ['.git', 'README.md', 'readme.md', 'package.json', 'Justfile', 'justfile', 'Makefile', 'Containerfile', 'Dockerfile', 'Cargo.toml', 'go.mod', 'pyproject.toml', 'CMakeLists.txt', 'flake.nix'];
+const SKIP_DIRS = /^(node_modules|vendor|venv|__pycache__|output|out|build|builds|dist|target|releases?|artifacts|isos?|tmp|temp)$/i;
+const SCAN = { depth: 8, dirs: 3000 };
+
+function realReaddir(d) {
+  try { return fs.readdirSync(d, { withFileTypes: true }).map((e) => ({ name: e.name, dir: e.isDirectory() })); } catch { return []; }
+}
+
+/** Bounded search for logo pictures in a project folder; best first. readdir(d) → [{ name, dir }] */
+function scanLogos(root, readdir = realReaddir) {
+  const slug = (path.basename(root).toLowerCase().match(/[a-z0-9]+/) || [''])[0];
+  const found = [];
+  const queue = [[root, 0]];
+  let seen = 0;
+  while (queue.length && seen < SCAN.dirs) {
+    const [d, depth] = queue.shift(); seen++;
+    for (const e of readdir(d)) {
+      if (e.dir) { if (depth < SCAN.depth && !SKIP_DIRS.test(e.name) && !e.name.startsWith('.')) queue.push([path.join(d, e.name), depth + 1]); continue; }
+      const m = /^(.*logo.*)\.(svg|png)$/i.exec(e.name);
+      if (!m) continue;
+      const base = m[1].toLowerCase();
+      let score = m[2].toLowerCase() === 'svg' ? 3 : 0;
+      if (base === 'logo' || (slug && [`${slug}-logo`, `${slug}_logo`, `${slug}logo`, `logo-${slug}`].includes(base))) score += 4;
+      else if (slug && base.includes(slug)) score += 2;
+      if (/header|banner|dark|white|black|mono|text|word|small|tiny|symbolic/.test(base)) score -= 3;
+      if (/(^|[\/])(256x256|512x512)([\/]|$)/.test(d)) score += 1;
+      found.push({ f: path.join(d, e.name), score, depth });
+    }
+  }
+  return found.sort((a, b) => b.score - a.score || a.depth - b.depth).slice(0, 3).map((x) => x.f);
+}
+
+/** exists/readdir only for tests – a fake exists without readdir never searches deeper. */
+function projectLogoFiles(file, exists = fs.existsSync, readdir = exists === fs.existsSync ? realReaddir : () => []) {
   if (!file) return [];
-  const dir = path.dirname(String(file));
-  const dirs = [dir];
-  if (BUILD_DIRS.test(path.basename(dir))) dirs.push(path.dirname(dir));
+  const dirs = [path.dirname(String(file))];
+  const last = () => dirs[dirs.length - 1];
+  for (let i = 0; i < 3 && (BUILD_DIRS.test(path.basename(last())) || VERSION_DIR.test(path.basename(last()))); i++) {
+    const up = path.dirname(last());
+    if (up === last()) break;
+    dirs.push(up);
+  }
   const out = [];
-  for (const d of dirs) for (const n of LOGO_FILES) { const f = path.join(d, n); if (exists(f)) out.push(f); }
+  for (const d of dirs) for (const n of LOGO_FILES) { const f = path.join(d, n); if (exists(f) && !out.includes(f)) out.push(f); }
+  // deeper only in a real project folder: above a build folder (output/…) with a README, Justfile …, or a git repository –
+  // never in Downloads or a whole drive
+  const root = last();
+  const project = exists(path.join(root, '.git')) || (dirs.length > 1 && MARKERS.some((n) => exists(path.join(root, n))));
+  if (project) for (const f of scanLogos(root, readdir)) if (!out.includes(f)) out.push(f);
   return out;
 }
 
@@ -68,4 +115,4 @@ function logoSources(vm, hint, exists) {
   return [...own, ...logoCandidates(text).map((slug) => ({ url: `${ICONS}/${slug}.svg`, color: true }))];
 }
 
-module.exports = { logoCandidates, logoSources, projectLogoFiles, systemText, ICONS };
+module.exports = { logoCandidates, logoSources, projectLogoFiles, scanLogos, systemText, ICONS };

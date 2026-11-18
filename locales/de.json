@@ -626,7 +626,6 @@
   "Mount now": "Jetzt einbinden",
   "Share": "Freigeben",
   "Not in an internal network": "In keinem internen Netz",
-  "Create one under “Engines & settings” or right here when joining.": "Lege eines unter „Programme & Einstellungen“ an – oder direkt hier beim Beitreten.",
   "Join an internal network": "Einem internen Netz beitreten",
   "Address in this network (optional)": "Adresse in diesem Netz (optional)",
   "Empty: the VM sets its address itself.": "Leer: Die VM stellt ihre Adresse selbst ein.",
@@ -988,5 +987,6 @@
   "Copy, clone, template and export work while the VM is off.": "Kopieren, Klonen, Vorlage und Export gehen, solange die VM aus ist.",
   "Other system": "Anderes System",
   "Commands in the VM": "Befehle in der VM",
-  "switch already open on another port": "Der Switch ist schon auf einem anderen Port offen"
+  "switch already open on another port": "Der Switch ist schon auf einem anderen Port offen",
+  "Create one under “Settings” on the overview of the VMs – or right here when joining.": "Lege eines unter „Einstellungen“ in der Übersicht der VMs an – oder direkt hier beim Beitreten."
 }

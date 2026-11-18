@@ -417,7 +417,15 @@ export default {
     tip: (o) => {
       const kind = o && o.kinds && o.kinds.vm;
       const list = kind ? kind.items || [] : null;
-      return { text: t('Virtual machines with QEMU – and your VirtualBox VMs.'), lines: list && list.map((v) => ({ name: v.name, state: v.state === 'running' ? 'running' : 'stopped', text: v.osLabel || '' })) };
+      // the state comes from Hostwerk's overview as proc.state (kind.proc: starting · running · stopping · error · stopped;
+      // a paused VM counts as running, extra.paused says so) – the VM entries themselves have no "state"
+      return {
+        text: t('Virtual machines with QEMU – and your VirtualBox VMs.'),
+        lines: list && list.map((v) => {
+          const p = v.proc || {}; const st = p.state || 'stopped';
+          return { name: v.name, state: st, text: st === 'error' ? p.error || t('Error') : (p.extra || {}).paused ? t('Paused') : v.detail || v.osLabel || '' };
+        }),
+      };
     },
   },
 };

@@ -155,12 +155,13 @@ function Overview({ vm, on, engines, onClone, onRemove, reload, reloadList }) {
         </div>
         <div className="card">
           <div className="card-head"><Plug size={16} aria-hidden="true" /><h3>{t('Connect')}</h3><span className="grow" />
-            {on && <span className={`badge ${agent && agent.ok ? 'ok' : ''}`}>{agent && agent.ok ? t('Guest agent connected') : t('Waiting for the guest agent …')}</span>}
             <InfoTip pop title={t('Guest agent')}>{t('A small helper inside the VM (qemu-guest-agent). With it Hostwerk sees the IP addresses, shuts down cleanly and freezes the file system for consistent snapshots and backups. Ready-made Linux VMs bring it along; on Windows install it from the virtio-win ISO.')}</InfoTip>
           </div>
           <div className="card-body stack">
+            {on && <div className="row-tight small"><span className={`vm-dot ${agent && agent.ok ? 'running' : 'starting'}`} aria-hidden="true" /><span className={agent && agent.ok ? '' : 'muted'}>{agent && agent.ok ? t('Guest agent connected') : t('Waiting for the guest agent …')}</span></div>}
             {vm.ssh ? <>
-              <div className="row"><code className="mono grow vm-code">{vm.ssh.command}</code><Btn className="xs" icon={Copy} onClick={() => copy(vm.ssh.command)}>Copy</Btn>{on && <Btn className="xs" icon={Terminal} onClick={() => runInTerminal(vm.ssh.command, { title: vm.name })}>Terminal</Btn>}</div>
+              <code className="mono vm-code vm-code-wrap">{vm.ssh.command}</code>
+              <div className="row-tight"><Btn className="xs" icon={Copy} onClick={() => copy(vm.ssh.command)}>Copy</Btn>{on && <Btn className="xs" icon={Terminal} onClick={() => runInTerminal(vm.ssh.command, { title: vm.name })}>Terminal</Btn>}</div>
               <div className="small muted">{t('SSH is forwarded from port {port} on this PC.', { port: vm.ssh.port })}{vm.cloud ? ` ${t('Sign in with the user and password from the creation.')}` : ''}</div>
             </> : <div className="small muted">{t('No SSH forwarding – add one under Network.')}</div>}
             {agent && agent.ok && agent.os && <div className="small muted">{agent.os}{agent.hostname ? ` · ${agent.hostname}` : ''}{(agent.addresses || []).length > 1 ? ` · ${agent.addresses.filter((a) => a.type === 'ipv4').map((a) => `${a.iface} ${a.ip}`).join(', ')}` : ''}</div>}
@@ -189,10 +190,9 @@ function Overview({ vm, on, engines, onClone, onRemove, reload, reloadList }) {
               <ExportButton vm={vm} on={on} />
             </div>
             {on && <div className="small muted">{t('Copy, clone, template and export work while the VM is off.')}</div>}
-            <div className="row">
-              <div className="grow small muted" style={{ minWidth: 0 }}>{t('Folder')}: <span className="mono">{vm.dir}</span>{vm.importedFrom ? ` · ${t('taken over from VirtualBox “{name}”', { name: vm.importedFrom.name })}` : ''}</div>
-              <Btn className="sm danger" icon={Trash2} onClick={onRemove}>Delete …</Btn>
-            </div>
+            <div className="small muted">{t('Folder')}{vm.importedFrom ? ` · ${t('taken over from VirtualBox “{name}”', { name: vm.importedFrom.name })}` : ''}</div>
+            <code className="mono small vm-code vm-code-wrap">{vm.dir}</code>
+            <div className="row"><span className="grow" /><Btn className="sm danger" icon={Trash2} onClick={onRemove}>Delete …</Btn></div>
           </div>
         </div>
         <Notes vm={vm} reload={reload} />
@@ -614,7 +614,7 @@ function InternalNets({ vm, on, reload }) {
     <div className="card">
       <div className="card-head"><Network size={16} aria-hidden="true" /><h3>{t('Internal networks')}</h3><span className="grow" /><Btn className="btn sm" icon={Plus} disabled={on || mine.length >= 2} onClick={nets.length ? open : newNet} title={on ? t('Shut the VM down first') : undefined}>Join …</Btn></div>
       <div className="card-body small muted">{t('A second (and third) network card that only connects VMs of this PC with each other – for a database next to a web server, a lab or a test network. Up to two networks per VM.')}</div>
-      {!mine.length ? <div className="card-body"><Empty icon={Network} title="Not in an internal network" text="Create one under “Engines & settings” or right here when joining." /></div> : (
+      {!mine.length ? <div className="card-body"><Empty icon={Network} title="Not in an internal network" text="Create one under “Settings” on the overview of the VMs – or right here when joining." /></div> : (
         <div className="list-rows">
           {mine.map((x) => {
             const s = setup && setup.find((y) => y.net === x.net);
@@ -702,6 +702,7 @@ function SharedFolders({ vm, on, reload }) {
   );
 }
 
+const bridgeHowto = () => t('A bridge needs the free “TAP-Windows” driver (from OpenVPN, installing it needs administrator rights – Hostwerk never installs it). Then, once: Network Connections (ncpa.cpl) → select the TAP adapter and your network card → right-click → “Bridge Connections”. Wi-Fi cards often cannot be bridged.');
 function NetMode({ vm, on, reload }) {
   const { data } = useApi('/vms/taps', [vm.id], { live: false });
   const taps = (data && data.taps) || [];
@@ -716,10 +717,13 @@ function NetMode({ vm, on, reload }) {
           <Field label="TAP adapter"><select className="select" value={vm.net.tap || ''} disabled={on} onChange={(e) => set({ mode: 'bridge', tap: e.target.value })}>{taps.map((x) => <option key={x.name} value={x.name}>{x.name} · {x.description} · {x.status}</option>)}{vm.net.tap && !taps.some((x) => x.name === vm.net.tap) && <option value={vm.net.tap}>{vm.net.tap} ({t('missing')})</option>}</select></Field>
         )}
         <div className="small muted">{mode === 'bridge' ? t('The VM is its own device in your home network and gets its address from your router. Port forwarding and shared folders do not apply.') : mode === 'none' ? t('The VM has no network (internal networks still work).') : t('The VM is behind its own small router (NAT): internet yes, reachable from this PC through port forwarding.')}</div>
-        {(mode === 'bridge' || !taps.length) && (
+        {/* how to set up a bridge: as a note when the bridge is chosen, otherwise folded away (NAT is what almost everyone uses) */}
+        {mode === 'bridge' ? (
           <Callout kind={taps.length ? 'info' : 'warn'} dismissible={false} title={t('Network bridge on Windows')}>
-            {taps.length ? t('{n} TAP adapter(s) found.', { n: taps.length }) : t('No TAP adapter found.')} {t('A bridge needs the free “TAP-Windows” driver (from OpenVPN, installing it needs administrator rights – Hostwerk never installs it). Then, once: Network Connections (ncpa.cpl) → select the TAP adapter and your network card → right-click → “Bridge Connections”. Wi-Fi cards often cannot be bridged.')}
+            {taps.length ? t('{n} TAP adapter(s) found.', { n: taps.length }) : t('No TAP adapter found.')} {bridgeHowto()}
           </Callout>
+        ) : !taps.length && (
+          <details className="small muted vm-details"><summary>{t('Network bridge on Windows')}</summary><p>{t('No TAP adapter found.')} {bridgeHowto()}</p></details>
         )}
         {on && <div className="small muted">{t('Change when the VM is off.')}</div>}
       </div>
