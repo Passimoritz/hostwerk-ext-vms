@@ -8,6 +8,7 @@ import { CreateDialog } from './create';
 import { VmDetail } from './detail';
 import { Screen } from './screen';
 import { BASE, STATE, stateOf, isOn, OsIcon, VmLogo, ipOf, mem, go, run, Crumbs } from './common';
+import { vmMenu, vboxMenu } from './menu';
 import './style.css';
 
 /*
@@ -105,7 +106,7 @@ function VmCard({ vm, reload, onFromTemplate }) {
   const act = async (p) => { setBusy(p); await run(() => post(`/vms/${vm.id}/${p}`)); setBusy(null); reload({ silent: true }); };
   const app = vm.appInfo && vm.appInfo.open;
   return (
-    <div className={`card svc-card vm-card ${s.pill}`} onClick={() => go(vm.id)}>
+    <div className={`card svc-card vm-card ${s.pill}`} onClick={() => go(vm.id)} onContextMenu={(e) => vmMenu(e, vm, { reload })} title={t('Right-click for more actions')}>
       <div className="svc-top">
         <VmLogo vm={vm} />
         <div className="grow" style={{ minWidth: 0 }}>
@@ -125,6 +126,7 @@ function VmCard({ vm, reload, onFromTemplate }) {
           : vm.creating || vm.busy ? <span className="small muted">{label}</span>
             : !on ? <Btn className="sm primary" icon={Play} busy={busy === 'start'} disabled={vm.broken} onClick={() => act('start')}>Start</Btn>
               : <>
+                {st === 'paused' && <Btn className="sm primary" icon={Play} busy={busy === 'resume'} onClick={() => act('resume')}>Resume</Btn>}
                 <Btn className="sm" icon={Square} busy={busy === 'stop'} onClick={() => act('stop')}>Shut down</Btn>
                 <Btn className="sm ghost" icon={Monitor} onClick={() => go(`${vm.id}/screen`)}>Screen</Btn>
               </>}
@@ -185,7 +187,7 @@ function VboxList({ list, installed, reload, onImport }) {
           const on = v.state === 'running' || v.state === 'paused';
           const act = (a) => run(async () => { await post(`/vms/vbox/${v.uuid}/${a}`); reload({ silent: true }); });
           return (
-            <div key={v.uuid} className={`card svc-card vm-card ${s.pill}`} onClick={() => go(`vbox/${v.uuid}`)}>
+            <div key={v.uuid} className={`card svc-card vm-card ${s.pill}`} onClick={() => go(`vbox/${v.uuid}`)} onContextMenu={(e) => vboxMenu(e, v, { reload, onImport })} title={t('Right-click for more actions')}>
               <div className="svc-top">
                 <VmLogo vboxUuid={v.uuid} osType={v.osType} />
                 <div className="grow" style={{ minWidth: 0 }}><div className="svc-title ellipsis">{v.name}</div><div className="small muted ellipsis">{v.osType}</div></div>

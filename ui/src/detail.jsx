@@ -7,6 +7,7 @@ import { t } from '@hostwerk/i18n';
 import { Screen, PausedNote } from './screen';
 import { VncScreen } from './vnc';
 import { STATE, stateOf, isOn, OsIcon, VmLogo, ipOf, Crumbs, mem, gb, copy, run, go } from './common';
+import { removeVm } from './menu';
 import { CreateDialog } from './create';
 
 /*
@@ -30,6 +31,8 @@ export function VmDetail({ id, tab, engines, reloadList }) {
   const [askAi, setAskAi] = useState(false);
   const aiReady = useAiReady();
   useEffect(() => setPngScreen(false), [id]);
+  // another tab or VM starts at the top (Hostwerk keeps the scroll position within one page – Hardware opened half way down)
+  useEffect(() => { const el = document.getElementById('hauptinhalt'); if (el) el.scrollTop = 0; }, [id, tab]);
   // Ctrl+J attaches this VM (own @ source "vm" of the extension: state, agent, serial console as text)
   useAiContext(vm && vm.id === id ? { kind: 'vm', id: vm.id, label: vm.name } : null);
   useEffect(() => { const t0 = setInterval(() => reload({ silent: true }), 4000); return () => clearInterval(t0); }, [reload]);
@@ -50,10 +53,7 @@ export function VmDetail({ id, tab, engines, reloadList }) {
   const act = (p, body, ok) => run(async () => { await post(`/vms/${id}/${p}`, body); await reload({ silent: true }); reloadList(); }, ok);
   const powerOff = async () => { if (await confirmDialog({ title: t('Power off “{name}”?', { name: vm.name }), text: t('Like pulling the plug – data the VM has not saved is lost.'), confirm: t('Power off'), danger: true })) act('poweroff'); };
   const reset = async () => { if (await confirmDialog({ title: t('Reset “{name}”?', { name: vm.name }), text: t('Restarts the VM at once, like the reset button of a PC – unsaved data is lost.'), confirm: t('Reset'), danger: true })) act('reset'); };
-  const remove = async () => {
-    if (!(await confirmDialog({ title: t('Delete “{name}”?', { name: vm.name }), text: t('The VM folder with all disks and snapshots is deleted. Backups stay.'), confirm: t('Delete'), danger: true, typeToConfirm: vm.name }))) return;
-    if (await run(() => del(`/vms/${id}`), 'Deleted')) { go(); reloadList(); }
-  };
+  const remove = () => removeVm(vm, () => { go(); reloadList(); });
   const cloneVm = async (linked) => {
     const name = await promptDialog({ title: linked ? t('Linked clone') : t('Copy VM'), text: linked ? t('Shares the disk with “{name}” – fast and small, but “{name}” must stay.', { name: vm.name }) : t('A full, independent copy.'), label: t('Name'), value: `${vm.name} 2`, confirm: t('Create') });
     if (!name) return;

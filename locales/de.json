@@ -988,5 +988,13 @@
   "Other system": "Anderes System",
   "Commands in the VM": "Befehle in der VM",
   "switch already open on another port": "Der Switch ist schon auf einem anderen Port offen",
-  "Create one under “Settings” on the overview of the VMs – or right here when joining.": "Lege eines unter „Einstellungen“ in der Übersicht der VMs an – oder direkt hier beim Beitreten."
+  "Create one under “Settings” on the overview of the VMs – or right here when joining.": "Lege eines unter „Einstellungen“ in der Übersicht der VMs an – oder direkt hier beim Beitreten.",
+  "Right-click for more actions": "Rechtsklick für weitere Aktionen",
+  "Open the screen": "Bildschirm öffnen",
+  "Take a snapshot …": "Snapshot anlegen …",
+  "Hardware …": "Hardware …",
+  "Copy SSH command": "SSH-Befehl kopieren",
+  "Copy IP address": "IP-Adresse kopieren",
+  "Snapshot taken": "Snapshot angelegt",
+  "Deleted": "Gelöscht"
 }

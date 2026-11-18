@@ -59,6 +59,8 @@ function routes(router, m) {
   router.post('/vms/:id/start', h((req) => m.start(req.params.id, { once: body(req).once || null })));
   router.post('/vms/:id/stop', h((req) => m.stop(req.params.id, { force: !!body(req).force })));
   router.post('/vms/:id/poweroff', h((req) => m.stop(req.params.id, { force: true })));
+  // Hostwerk's service menu ("stop immediately", asks first) and Hostwerk.services(): kill = power off
+  router.post('/vms/:id/kill', h((req) => m.stop(req.params.id, { force: true })));
   router.post('/vms/:id/restart', h((req) => m.restart(req.params.id)));
   // Shared folders (#13): mount now (Linux, through the guest agent) – Windows gets the command for its own session
   router.post('/vms/:id/shares/:share/mount', h((req) => m.mountShare(req.params.id, req.params.share)));

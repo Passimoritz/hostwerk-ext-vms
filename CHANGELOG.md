@@ -1,3 +1,8 @@
+## 1.0.5
+
+- Right-click menus on the VM cards – Hostwerk's own service menu like web servers and Minecraft servers: open, start, shut down, restart, stop immediately, open the screen, pause/resume, take a snapshot, hardware, copy SSH command and IP address, favourite, picture, clone, AI helper, move to another PC and delete. VirtualBox VMs: open, start, shut down, power off and take over. / Rechtsklickmenüs auf den VM-Karten wie bei Webservern und Minecraft – samt Bildschirm, Anhalten, Snapshot, SSH-Befehl und Umziehen; für VirtualBox-VMs Starten, Herunterfahren, Ausschalten und Übernehmen.
+- Fixed: a paused VM's card offered no “Resume”; another tab or VM of a VM page opened half way down where the last one was scrolled; “stop immediately” from Hostwerk's menus now powers the VM off. / Behoben: angehaltene VM ohne „Fortsetzen“ auf der Karte, Reiter öffneten weiter unten, „Sofort beenden“ aus Hostwerks Menüs schaltet die VM aus.
+
 ## 1.0.4
 
 - Sidebar: the dot and the info card of “Virtual machines” now show the real state – running VMs were always shown as off (“1 of 3 running”, starting/stopping, errors and paused VMs as well; it follows starts and stops live). / Seitenleiste: Punkt und Info-Karte zeigen den echten Zustand – laufende VMs standen immer als „aus“ da.
