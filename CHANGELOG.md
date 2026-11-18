@@ -1,3 +1,7 @@
+## 1.0.6
+
+- Icon and banner in Hostwerk's shared style like the other extensions (dark ground with a glow, a coloured motif – a computer inside the computer with the guest window in front – and the glass tile in the banner). / Symbol und Banner im gemeinsamen Hostwerk-Stil wie die anderen Erweiterungen.
+
 ## 1.0.5
 
 - Right-click menus on the VM cards – Hostwerk's own service menu like web servers and Minecraft servers: open, start, shut down, restart, stop immediately, open the screen, pause/resume, take a snapshot, hardware, copy SSH command and IP address, favourite, picture, clone, AI helper, move to another PC and delete. VirtualBox VMs: open, start, shut down, power off and take over. / Rechtsklickmenüs auf den VM-Karten wie bei Webservern und Minecraft – samt Bildschirm, Anhalten, Snapshot, SSH-Befehl und Umziehen; für VirtualBox-VMs Starten, Herunterfahren, Ausschalten und Übernehmen.
