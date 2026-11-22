@@ -95,6 +95,8 @@ class VBox {
     const r = await this.runFn(exe, args, { timeout: 120000, ...opts });
     if (r.code !== 0) {
       const msg = `${r.stderr || ''}\n${r.stdout || ''}`.split(/\r?\n/).map((l) => l.replace(/^VBoxManage(\.exe)?: error: /, '').trim()).filter(Boolean).slice(0, 2).join(' ');
+      // a VM removed in VirtualBox (or a wrong link): 404 with a readable text instead of VirtualBox's raw message
+      if (/VBOX_E_OBJECT_NOT_FOUND|Could not find a registered machine/i.test(msg)) throw U.fail(404, 'VirtualBox VM not found – it may have been removed in VirtualBox.');
       throw Object.assign(new Error(msg || `VBoxManage: exit code ${r.code}`), { status: 500 });
     }
     return r;

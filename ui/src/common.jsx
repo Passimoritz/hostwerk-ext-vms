@@ -17,6 +17,14 @@ export const STATE = {
   error: { label: 'Error', pill: 'error' },
 };
 export const stateOf = (v) => (v.creating ? 'starting' : (v.status && v.status.state) || 'stopped');
+/** Namen vergleichen wie ein Mensch: ohne Groß/Klein und Leerzeichen am Rand. */
+export const nameKey = (n) => String(n || '').trim().toLowerCase();
+/** Namen, die mehr als eine VM trägt (als nameKey). */
+export function dupNames(vms) {
+  const seen = new Map();
+  for (const v of vms || []) { const k = nameKey(v.name); if (k) seen.set(k, (seen.get(k) || 0) + 1); }
+  return new Set([...seen].filter(([, n]) => n > 1).map(([k]) => k));
+}
 export const isOn = (s) => ['running', 'paused', 'starting', 'stopping'].includes(s);
 
 export function OsIcon({ vm, size = 18 }) {

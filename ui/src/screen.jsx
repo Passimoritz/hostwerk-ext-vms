@@ -80,7 +80,8 @@ export function Screen({ vm, vbox = false, active = true }) {
   }, [captured, vbox]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const typeText = async () => {
-    const text = await promptDialog({ title: t('Type text'), text: t('Hostwerk types the text into the VM key by key (US keyboard layout).'), label: t('Text'), confirm: t('Type') });
+    // QEMU types with the layout of the VM (Hardware → Keyboard); VirtualBox always as on a US keyboard
+    const text = await promptDialog({ title: t('Type text'), text: vbox ? t('Hostwerk types the text into the VM key by key (US keyboard layout).') : t('Hostwerk types the text into the VM key by key – with the keyboard layout set under Hardware → Keyboard.'), label: t('Text'), confirm: t('Type') });
     if (!text) return;
     try { await post(vbox ? `${base}/type` : `${base}/type`, { text }); } catch (e) { toast.error(e.message); }
   };

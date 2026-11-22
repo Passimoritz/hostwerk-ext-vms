@@ -324,7 +324,8 @@ test('vbox: commands go to VBoxManage as arguments; foreign VMs are never delete
   await assert.rejects(v.control(id, 'format-c'), /Unknown action/);
   await assert.rejects(v.start('../../x'), /Invalid VirtualBox id/);
   await assert.rejects(v.snapshot(id, 'take', 'a"b'), /Invalid snapshot name/);
-  await assert.rejects(v.start('11111111-1111-1111-1111-111111111111'), /Could not find a registered machine/);
+  // a VM removed in VirtualBox: readable 404 instead of VirtualBox's raw text
+  await assert.rejects(v.start('11111111-1111-1111-1111-111111111111'), (e) => e.status === 404 && /VirtualBox VM not found/.test(e.message));
   await assert.rejects(v.removeManaged(id), (e) => e.status === 403);
   assert.ok(!calls.some((c) => c[0] === 'unregistervm'));
   managed.add(id);

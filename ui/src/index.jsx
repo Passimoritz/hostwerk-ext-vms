@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Monitor, Plus, Cpu, Settings2, Layers, Play, Square, Power, Pause, Camera, Trash2, Download, Zap, HardDrive, History, Import, Network, Server, ExternalLink } from 'lucide-react';
+import { Monitor, Plus, Cpu, Settings2, Layers, Play, Square, Power, Pause, Camera, Trash2, Download, Zap, HardDrive, History, Import, Network, Server, ExternalLink, AlertTriangle } from 'lucide-react';
 import { post, del, put, useApi, waitJob, fmtBytes, fmtDate, openExternal } from '@hostwerk/api';
 import { Btn, Empty, Loading, Callout, StatusPill, Tabs, Switch, SettingRow, TileEmpty, confirmDialog, promptDialog, toast, InfoTip } from '@hostwerk/ui';
 import { AddTile } from '@hostwerk/kit';
@@ -7,7 +7,7 @@ import { t } from '@hostwerk/i18n';
 import { CreateDialog } from './create';
 import { VmDetail } from './detail';
 import { Screen } from './screen';
-import { BASE, STATE, stateOf, isOn, OsIcon, VmLogo, ipOf, mem, go, run, Crumbs } from './common';
+import { BASE, STATE, stateOf, isOn, OsIcon, VmLogo, ipOf, mem, go, run, Crumbs, nameKey, dupNames } from './common';
 import { vmMenu, vboxMenu } from './menu';
 import './style.css';
 
@@ -81,21 +81,23 @@ function VmsPage({ path = [] }) {
 
 /* ------------------------------------------------------------------ Machines (service cards) */
 function Machines({ machines, templates, noQemu, onNew, reload }) {
+  // Gleicher Name zweimal (z. B. zwei „web-01“): auf beiden Karten ein Hinweis
+  const dupes = dupNames([...machines, ...templates]);
   return (
     <div className="stack">
       <div className="grid grid-auto">
-        {machines.map((v) => <VmCard key={v.id} vm={v} reload={reload} />)}
+        {machines.map((v) => <VmCard key={v.id} vm={v} reload={reload} dupName={dupes.has(nameKey(v.name))} />)}
         {!noQemu && <AddTile onClick={() => onNew()} title={t('Another VM')} text={t('Ready-made Linux in a minute, any ISO or a VirtualBox VM')} chips={[{ label: 'Debian', color: '#d70a53' }, { label: 'Ubuntu', color: '#e95420' }, { label: 'Windows', color: '#0078d4' }, { label: 'ISO', color: '#0ea5e9' }, { label: 'VirtualBox', color: '#2563eb' }]} />}
       </div>
       {templates.length > 0 && <>
         <h3 className="vm-section">{t('Templates')} <InfoTip pop title={t('Templates')}>{t('Set up once, then new VMs from it in seconds as linked clones.')}</InfoTip></h3>
-        <div className="grid grid-auto">{templates.map((v) => <VmCard key={v.id} vm={v} reload={reload} onFromTemplate={() => onNew({ source: 'template', template: v.id })} />)}</div>
+        <div className="grid grid-auto">{templates.map((v) => <VmCard key={v.id} vm={v} reload={reload} dupName={dupes.has(nameKey(v.name))} onFromTemplate={() => onNew({ source: 'template', template: v.id })} />)}</div>
       </>}
     </div>
   );
 }
 
-function VmCard({ vm, reload, onFromTemplate }) {
+function VmCard({ vm, reload, onFromTemplate, dupName = false }) {
   const [busy, setBusy] = useState(null);
   const st = stateOf(vm);
   const on = isOn(st);
@@ -110,12 +112,17 @@ function VmCard({ vm, reload, onFromTemplate }) {
       <div className="svc-top">
         <VmLogo vm={vm} />
         <div className="grow" style={{ minWidth: 0 }}>
-          <div className="svc-title ellipsis">{vm.name}</div>
+          <div className="svc-title ellipsis" title={vm.name}>{vm.name}</div>
           <div className="small muted ellipsis">{[vm.osLabel || (vm.osType === 'windows' ? 'Windows' : vm.osType === 'linux' ? 'Linux' : t('Other system')), vm.arch === 'aarch64' ? 'ARM64' : null, vm.appInfo ? t(vm.appInfo.label) : null].filter(Boolean).join(' · ')}</div>
         </div>
         {!vm.template && <StatusPill state={vm.creating || vm.busy ? 'starting' : s.pill} label={label} />}
         {vm.template && <span className="badge accent">{t('Template')}</span>}
       </div>
+      {st === 'error' && vm.status && vm.status.error && (
+        // Warum die VM stoppte – sonst erst auf der Seite der VM zu sehen
+        <div className="small vm-card-error" role="note" title={vm.status.hint ? `${vm.status.error} – ${vm.status.hint}` : vm.status.error}><AlertTriangle size={13} aria-hidden="true" /><span className="ellipsis">{vm.status.error}</span></div>
+      )}
+      {dupName && <div className="tiny c-warn vm-card-dupe" title={t('Two VMs with the same name are hard to tell apart in lists and menus – rename one of them.')}>{t('Name used twice')}</div>}
       <div className="svc-meta">
         <div><div className="k">{t('Hardware')}</div><div className="v">{vm.cpus} CPU · {mem(vm.memoryMb)}</div></div>
         <div><div className="k">{t('Address')}</div><div className="v mono small">{ip || (ssh ? `SSH :${ssh.host}` : '–')}</div></div>
@@ -190,7 +197,7 @@ function VboxList({ list, installed, reload, onImport }) {
             <div key={v.uuid} className={`card svc-card vm-card ${s.pill}`} onClick={() => go(`vbox/${v.uuid}`)} onContextMenu={(e) => vboxMenu(e, v, { reload, onImport })} title={t('Right-click for more actions')}>
               <div className="svc-top">
                 <VmLogo vboxUuid={v.uuid} osType={v.osType} />
-                <div className="grow" style={{ minWidth: 0 }}><div className="svc-title ellipsis">{v.name}</div><div className="small muted ellipsis">{v.osType}</div></div>
+                <div className="grow" style={{ minWidth: 0 }}><div className="svc-title ellipsis" title={v.name}>{v.name}</div><div className="small muted ellipsis">{v.osType}</div></div>
                 <StatusPill state={s.pill} label={t(s.label)} />
               </div>
               <div className="svc-actions" onClick={(e) => e.stopPropagation()}>

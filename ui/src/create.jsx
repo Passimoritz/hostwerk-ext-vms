@@ -3,7 +3,7 @@ import { Rocket, Disc3, HardDrive, PackageOpen, Box, Layers, FolderOpen, Cloud, 
 import { get, post, useApi, waitJob, pickPath, canPickPath } from '@hostwerk/api';
 import { Btn, Modal, Field, Seg, Switch, Callout, toast, InfoTip } from '@hostwerk/ui';
 import { t } from '@hostwerk/i18n';
-import { go, mem } from './common';
+import { go, mem, nameKey } from './common';
 
 /*
  * New VM in two steps: 1. where it comes from, 2. name and size (with good defaults per system). Ready-made Linux
@@ -43,6 +43,7 @@ export function CreateDialog({ onClose, engines, initial = {} }) {
   const entry = items.find((i) => i.id === f.image);
   const cached = new Set(((cat && cat.cache) || []).map((c) => c.id));
   const templates = ((list && list.vms) || []).filter((v) => v.template);
+  const nameTaken = !!f.name.trim() && ((list && list.vms) || []).some((v) => nameKey(v.name) === nameKey(f.name));
   const vboxVms = ((list && list.vbox) || []).filter((v) => v.state === 'stopped' || v.state === 'saved');
 
   useEffect(() => { if (source === 'iso' && !isos.some((i) => i.id === f.image)) setF((x) => ({ ...x, image: '' })); if (source === 'cloud' && !clouds.some((i) => i.id === f.image)) setF((x) => ({ ...x, image: 'debian-12' })); }, [source, items.length]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -136,7 +137,7 @@ export function CreateDialog({ onClose, engines, initial = {} }) {
                 <FolderOpen size={16} aria-hidden="true" /> <span className="grow">{t('My own ISO file')}</span>
               </label>
             </div>
-            {!f.image && <div className="row"><input className="input grow" value={f.iso} onChange={set('iso')} placeholder="C:\\Downloads\\Win11.iso" />{canPickPath() && <Btn className="btn" icon={FolderOpen} onClick={() => pick('iso', [{ name: 'ISO', extensions: ['iso', 'img'] }])}>Choose …</Btn>}</div>}
+            {!f.image && <div className="row"><input className="input grow" value={f.iso} onChange={set('iso')} placeholder={'C:\\Downloads\\Win11.iso'} />{canPickPath() && <Btn className="btn" icon={FolderOpen} onClick={() => pick('iso', [{ name: 'ISO', extensions: ['iso', 'img'] }])}>Choose …</Btn>}</div>}
           </Field>
         )}
         {['disk', 'ova'].includes(source) && (
@@ -161,7 +162,7 @@ export function CreateDialog({ onClose, engines, initial = {} }) {
           </Field>
         )}
         <div className="grid grid-2">
-          <Field label="Name"><input className="input" value={f.name} onChange={set('name')} placeholder={source === 'cloud' ? 'web-test' : 'Windows 11'} autoFocus /></Field>
+          <Field label="Name" hint={nameTaken ? t('A VM with this name exists already – two VMs with the same name are hard to tell apart.') : undefined}><input className="input" value={f.name} onChange={set('name')} placeholder={source === 'cloud' ? 'web-test' : 'Windows 11'} maxLength={60} autoFocus aria-invalid={nameTaken || undefined} /></Field>
           {['iso', 'empty', 'disk'].includes(source) && <Field label="System"><Seg value={f.osType} onChange={set('osType')} options={arch === 'aarch64' ? OS.filter((o) => o.id !== 'windows') : OS} /></Field>}
           {armOk && (['empty', 'disk'].includes(source) || (source === 'iso' && !f.image)) && <Field label="Processor" hint="ARM64 runs emulated – much slower than a PC VM."><Seg value={f.arch} onChange={(v) => setF((x) => ({ ...x, arch: v, osType: v === 'aarch64' && x.osType === 'windows' ? 'linux' : x.osType }))} options={[{ id: 'x86_64', label: t('PC (x86-64)') }, { id: 'aarch64', label: 'ARM64' }]} /></Field>}
           <Field label="Keyboard layout" hint={source === 'cloud' ? 'Set in the VM, too.' : 'Used when Hostwerk types text into the VM.'}><Seg value={f.keyboard} onChange={set('keyboard')} options={[{ id: 'de', label: t('German') }, { id: 'us', label: t('English (US)') }]} /></Field>

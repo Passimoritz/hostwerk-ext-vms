@@ -65,3 +65,7 @@
 .vm-manage { flex-wrap: wrap; gap: var(--sp-2); }
 .vm-details summary { cursor: pointer; }
 .vm-details p { margin: var(--sp-1) 0 0; }
+/* Karte: warum die VM mit Fehler stoppte (eine Zeile, ganzer Text im Tooltip) */
+.vm-card-error { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; color: var(--err-text, var(--err)); margin-top: var(--sp-2); }
+.vm-card-error svg { flex: none; }
+.vm-card-dupe { margin-top: var(--sp-1); }
