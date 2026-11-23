@@ -1005,5 +1005,15 @@
   "Two VMs with the same name are hard to tell apart in lists and menus – rename one of them.": "Zwei VMs mit gleichem Namen sind in Listen und Menüs kaum zu unterscheiden – benenne eine um.",
   "A VM with this name exists already – two VMs with the same name are hard to tell apart.": "Eine VM mit diesem Namen gibt es schon – zwei VMs mit gleichem Namen sind kaum zu unterscheiden.",
   "Move to another PC …": "Auf anderen PC umziehen …",
-  "Moves the VM with all disks to Hostwerk on another PC.": "Zieht die VM mit allen Platten zu Hostwerk auf einem anderen PC um."
+  "Moves the VM with all disks to Hostwerk on another PC.": "Zieht die VM mit allen Platten zu Hostwerk auf einem anderen PC um.",
+  "Restart": "Neu starten",
+  "Restarted": "Neu gestartet",
+  "Console": "Konsole",
+  "Serial console, commands in the VM and log": "Serielle Konsole, Befehle in der VM und Protokoll",
+  "Hardware and network": "Hardware und Netzwerk",
+  "Shuts the system down cleanly and starts it again.": "Fährt das System sauber herunter und startet es wieder.",
+  "Hard reset – like the reset button of a PC": "Hart zurücksetzen – wie die Reset-Taste eines PCs",
+  "The VM is paused": "Die VM ist angehalten",
+  "It keeps its memory and state but does not run – the screen stands still and the network does not answer. Resume it to go on.": "Sie behält Arbeitsspeicher und Zustand, läuft aber nicht – der Bildschirm steht still und das Netzwerk antwortet nicht. Fortsetzen, um weiterzumachen.",
+  "Restart – shuts the system down cleanly and starts it again": "Neu starten – fährt das System sauber herunter und startet es wieder"
 }

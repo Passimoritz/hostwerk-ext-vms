@@ -255,7 +255,14 @@ class Runtime {
   needQmp() { if (!this.qmp || !this.isRunning()) throw U.fail(409, 'The VM is not running.'); return this.qmp; }
 
   /** Clean shutdown: ACPI power button (and the guest agent, if it runs), hard stop after `timeout`. */
+  /**
+   * A stop that arrives while QEMU is being started again after a guest restart (-no-reboot) waits for that start –
+   * otherwise it would see "not running", do nothing, and the VM would come back up right after.
+   */
+  async settleRestart() { if (this.restartTask) await this.restartTask; }
+
   async shutdown({ timeout = 90000 } = {}) {
+    await this.settleRestart();
     if (!this.isRunning()) return;
     await this.ensureQmp();
     await this.proc.stop({
@@ -269,6 +276,7 @@ class Runtime {
   }
   /** Like pulling the plug – data the guest has not written yet is lost. */
   async powerOff() {
+    await this.settleRestart();
     if (!this.isRunning()) return;
     await this.ensureQmp();
     await this.proc.stop({ timeout: 5000, graceful: async () => { if (this.qmp) await this.qmp.exec('quit').catch(() => {}); } });

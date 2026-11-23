@@ -45,12 +45,45 @@ test('Windows under WHPX: named CPU model of the host vendor (max → bluescreen
   assert.equal(cpu(amd), 'EPYC-Rome');
   assert.ok(amd.includes('-no-reboot'));
   assert.equal(cpu(buildArgs(vm, o(['whpx'], 'intel'))), 'Skylake-Client');
-  // Linux under WHPX, Windows under KVM or TCG: unchanged
-  const lin = buildArgs({ ...vm, osType: 'linux' }, o(['whpx,kernel-irqchip=off'], 'amd'));
-  assert.equal(cpu(lin), 'max'); assert.ok(!lin.includes('-no-reboot'));
+  // Linux under WHPX: CPU "max", but -no-reboot as well – a guest reset hangs there too (UEFI Linux guest, 0 % CPU,
+  // "Display output is not active"); KVM and TCG reset fine
+  const lin = buildArgs({ ...vm, osType: 'linux' }, o(['whpx,kernel-irqchip=off', 'tcg'], 'amd'));
+  assert.equal(cpu(lin), 'max'); assert.ok(lin.includes('-no-reboot'));
+  assert.ok(buildArgs({ ...vm, osType: 'other' }, o(['whpx,kernel-irqchip=off', 'tcg'], 'amd')).includes('-no-reboot'));
   const kvm = buildArgs(vm, o(['kvm'], 'amd'));
   assert.equal(cpu(kvm), 'host'); assert.ok(!kvm.includes('-no-reboot'));
-  assert.equal(cpu(buildArgs(vm, o(['tcg'], 'amd'))), 'max');
+  const tcg = buildArgs({ ...vm, osType: 'linux' }, o(['tcg'], 'amd'));
+  assert.equal(cpu(tcg), 'max'); assert.ok(!tcg.includes('-no-reboot'));
+  const { rebootByRestart } = require('../server/qemu-args');
+  assert.equal(rebootByRestart({ osType: 'linux' }, ['whpx,kernel-irqchip=off', 'tcg']), true);
+  assert.equal(rebootByRestart({ osType: 'linux', arch: 'aarch64' }, ['whpx']), false, 'ARM always runs emulated');
+  assert.equal(rebootByRestart({ osType: 'linux' }, ['kvm', 'tcg']), false);
+});
+
+test('Linux under WHPX: a stop while QEMU comes back after a guest restart waits for it and then stops', async () => {
+  const stored = { id: 'l', name: 'l', osType: 'linux', boot: 'disk', disks: [] };
+  const r = new Runtime(stored, { qhost: {}, Proc: class {}, dir: tmp(), currentVm: () => stored });
+  let running = false; const stops = [];
+  r.proc = { info: () => ({ state: running ? 'running' : 'stopped' }), isRunning: () => running, log() {}, stop: async () => { stops.push('stop'); running = false; } };
+  let go;
+  r.start = () => new Promise((res) => { go = () => { running = true; res(); }; });
+  r.rebootByRestart = true;
+  r.onEvent({ event: 'SHUTDOWN', data: { guest: true, reason: 'guest-reset' } });
+  r.onQemuExit();
+  assert.equal(r.status().state, 'starting');
+  const stopping = r.shutdown();
+  await new Promise((res) => setImmediate(res));
+  assert.deepEqual(stops, [], 'the stop waits for the new start');
+  go();
+  await stopping;
+  assert.deepEqual(stops, ['stop']);
+  assert.equal(r.status().state, 'stopped');
+  // after a guest restart that went through the VM shows "running" again, not "starting" or "stopping"
+  r.onEvent({ event: 'SHUTDOWN', data: { guest: true, reason: 'guest-reset' } });
+  r.onQemuExit();
+  go();
+  await r.restartTask;
+  assert.equal(r.status().state, 'running');
 });
 
 test('-no-reboot VM: guest restart ends QEMU → the runtime starts it again with the stored description, no key presses', async () => {

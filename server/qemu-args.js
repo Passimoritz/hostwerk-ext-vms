@@ -39,11 +39,13 @@ function cpuFor(accel, vm, vendor = hostVendor()) {
 }
 
 /**
- * Windows under WHPX runs only with WHPX's own interrupt controller – and there a reset of the VM (guest restart or
- * system_reset) leaves QEMU paused for good. So these VMs run with -no-reboot: a restart ends QEMU and the runtime
- * starts it again (a fresh start always boots).
+ * Under WHPX a reset of the VM (guest restart or system_reset) does not come back: Windows (WHPX's own interrupt
+ * controller) is left paused for good, and Linux (kernel-irqchip=off) hangs as well – seen with a UEFI Linux guest on
+ * QEMU/WHPX: `systemctl reboot`, then 0 % CPU, "Display output is not active", the firmware never starts again. So every
+ * x86 VM under WHPX runs with -no-reboot: a restart ends QEMU and the runtime starts it again (a fresh start always
+ * boots). KVM, HVF and TCG reset fine.
  */
-function rebootByRestart(vm, accel) { return !!vm && vm.osType === 'windows' && vm.arch !== 'aarch64' && firstAccel(accel) === 'whpx'; }
+function rebootByRestart(vm, accel) { return !!vm && vm.arch !== 'aarch64' && firstAccel(accel) === 'whpx'; }
 
 /** Disk limits per disk (QEMU throttling): operations per second and bytes per second, both directions together. */
 function throttle(l) {

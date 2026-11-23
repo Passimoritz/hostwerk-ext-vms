@@ -46,7 +46,17 @@ prüft nur, dass Löschen abgelehnt wird.
 
 **Zur Engine.** QEMU nutzt WHPX unter Windows, KVM unter Linux und HVF unter macOS. WHPX kann den Arbeitsspeicher einer
 laufenden VM nicht speichern; Snapshots im Betrieb sind dort Platten-Snapshots – stimmig durch das Einfrieren des
-Dateisystems über den Gast-Agenten. Mit KVM/HVF/TCG können Snapshots den Arbeitsspeicher enthalten.
+Dateisystems über den Gast-Agenten. Mit KVM/HVF/TCG können Snapshots den Arbeitsspeicher enthalten. Ein Neustart aus
+dem Gast heraus bliebe unter WHPX hängen; deshalb laufen dort alle VMs mit `-no-reboot`, und Hostwerk startet QEMU von
+selbst neu (die VM zeigt kurz „Startet“, dann „Läuft“).
+
+**Skripte und andere Werkzeuge.** QMP, Gast-Agent und serielle Konsole sind QEMU-Sockets auf 127.0.0.1, die immer nur
+einen Client annehmen – Hostwerk hält sie, solange eine VM läuft; ein zweites Programm bekommt dort „Verbindung
+abgelehnt“ oder eine Zeitüberschreitung. Stattdessen Hostwerks API nutzen (gleiche Anmeldung wie die Seite, z. B. der
+Header `x-hostwerk-key`): `POST /api/vms/<id>/guest/exec` `{ "command": "…", "timeoutMs": 60000 }` (über den
+Gast-Agenten), `GET|POST /api/vms/<id>/serial`, `GET /api/vms/<id>/screen` (PNG), `POST /api/vms/<id>/type`
+`{ "text": "…" }`, `POST /api/vms/<id>/combo`, `…/restart`, `…/stop`, `…/reset`,
+`GET /api/vms/<id>/guest/download?path=…` und `POST /api/vms/<id>/guest/upload?name=…` (die Datei als Request-Body).
 
 Oberfläche in `ui/src`, Server-Teil in `server/`. Texte im Code sind Englisch, Deutsch steht in `locales/de.json`.
 

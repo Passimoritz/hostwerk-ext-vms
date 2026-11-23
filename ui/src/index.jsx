@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Monitor, Plus, Cpu, Settings2, Layers, Play, Square, Power, Pause, Camera, Trash2, Download, Zap, HardDrive, History, Import, Network, Server, ExternalLink, AlertTriangle } from 'lucide-react';
+import { Monitor, Plus, Cpu, Settings2, Layers, Play, Square, Power, Pause, RotateCw, Camera, Trash2, Download, Zap, HardDrive, History, Import, Network, Server, ExternalLink, AlertTriangle } from 'lucide-react';
 import { post, del, put, useApi, waitJob, fmtBytes, fmtDate, openExternal } from '@hostwerk/api';
 import { Btn, Empty, Loading, Callout, StatusPill, Tabs, Switch, SettingRow, TileEmpty, confirmDialog, promptDialog, toast, InfoTip } from '@hostwerk/ui';
 import { AddTile } from '@hostwerk/kit';
@@ -135,6 +135,7 @@ function VmCard({ vm, reload, onFromTemplate, dupName = false }) {
               : <>
                 {st === 'paused' && <Btn className="sm primary" icon={Play} busy={busy === 'resume'} onClick={() => act('resume')}>Resume</Btn>}
                 <Btn className="sm" icon={Square} busy={busy === 'stop'} onClick={() => act('stop')}>Shut down</Btn>
+                <Btn className="sm ghost" icon={RotateCw} busy={busy === 'restart'} disabled={st !== 'running' && st !== 'paused'} title={t('Restart – shuts the system down cleanly and starts it again')} aria-label={t('Restart')} onClick={() => act('restart')} />
                 <Btn className="sm ghost" icon={Monitor} onClick={() => go(`${vm.id}/screen`)}>Screen</Btn>
               </>}
         {on && app && <button type="button" className="btn sm ghost right" onClick={() => openExternal(app.url)}><ExternalLink />{t(app.label)}</button>}

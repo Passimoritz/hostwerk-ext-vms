@@ -45,7 +45,17 @@ VirtualBox VMs on the PC are never changed – the test only checks that deletin
 
 **Engine notes.** QEMU uses WHPX on Windows, KVM on Linux and HVF on macOS. WHPX cannot save the memory of a running VM
 (no dirty-page tracking), so snapshots of running VMs are disk snapshots there – consistent through the guest agent's
-file-system freeze; with KVM/HVF/TCG snapshots can include the memory.
+file-system freeze; with KVM/HVF/TCG snapshots can include the memory. A restart from inside the guest would hang under
+WHPX, so every VM there runs with `-no-reboot` and Hostwerk starts QEMU again by itself (the VM shows “Starting” for a
+moment, then “Running”).
+
+**Scripts and other tools.** QMP, the guest agent and the serial console are QEMU sockets on 127.0.0.1 that take one
+client at a time – Hostwerk holds them while a VM runs, so a second program gets “connection refused” or a timeout
+there. Use Hostwerk's API instead (same login as the page, e.g. the header `x-hostwerk-key`):
+`POST /api/vms/<id>/guest/exec` `{ "command": "…", "timeoutMs": 60000 }` (through the guest agent),
+`GET|POST /api/vms/<id>/serial`, `GET /api/vms/<id>/screen` (PNG), `POST /api/vms/<id>/type` `{ "text": "…" }`,
+`POST /api/vms/<id>/combo`, `…/restart`, `…/stop`, `…/reset`, `GET /api/vms/<id>/guest/download?path=…` and
+`POST /api/vms/<id>/guest/upload?name=…` (the file as the request body).
 
 Interface source in `ui/src`, server part in `server/`. Texts in the code are English, German is in `locales/de.json`.
 

@@ -1,3 +1,11 @@
+## 1.2.0
+
+- Fixed: restarting a Linux (or any other non-Windows) VM from inside the guest hung under WHPX – the VM stood still with 0 % CPU and “Display output is not active”, or showed “Paused”. Every VM under WHPX now restarts like Windows VMs already did: QEMU ends and Hostwerk starts it again at once; the VM shows “Starting” for a moment, then “Running”. A shut-down or power-off that arrives in that moment is no longer lost. / Behoben: Ein Neustart aus einer Linux-VM (und jedem anderen Nicht-Windows-Gast) blieb unter WHPX hängen – 0 % CPU, „Display output is not active“ oder „Angehalten“. Jede VM unter WHPX startet jetzt so neu wie Windows-VMs schon: QEMU endet, Hostwerk startet es sofort wieder; kurz „Startet“, dann „Läuft“. Ein Herunterfahren in diesem Moment geht nicht mehr verloren.
+- “Restart” button on the VM's page and its card – shuts the system down cleanly and starts it again; the reset button stays as the hard way. / „Neu starten“ auf der Seite und der Karte einer VM – fährt sauber herunter und startet wieder; die Reset-Taste bleibt für den harten Weg.
+- Tabs of a VM sorted by what you want to do: Overview · Screen · Console (serial console, commands in the VM, log) · Snapshots (with backups) · Settings (hardware, network). Old links keep working. / Reiter einer VM nach Aufgabe sortiert: Überblick · Bildschirm · Konsole (serielle Konsole, Befehle, Protokoll) · Snapshots (mit Sicherungen) · Einstellungen (Hardware, Netzwerk). Alte Links gehen weiter.
+- A paused VM says so above every tab, with what it means and a “Resume” button. / Eine angehaltene VM sagt das über jedem Reiter – mit Erklärung und „Fortsetzen“.
+- README: how scripts reach a running VM (QMP, guest agent and serial console are held by Hostwerk – use the API routes). / README: wie Skripte an eine laufende VM kommen (über die API statt QMP/Gast-Agent).
+
 ## 1.1.0
 
 - Right-click menu of a VM card: also copy, linked clone, template on/off and export (like “Manage” on the VM's page); the overview gets “Move to another PC …”. / Rechtsklickmenü einer VM-Karte: auch Kopieren, verknüpfter Klon, Vorlage an/aus und Exportieren (wie „Verwalten“ auf der Seite der VM); die Übersicht bekommt „Auf anderen PC umziehen …“.

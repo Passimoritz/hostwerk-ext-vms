@@ -831,7 +831,7 @@ class VmManager {
   async stop(id, { force = false } = {}) {
     this.get(id);
     const r = this.runtimes.get(id);
-    if (!r || !r.isRunning()) return { state: 'stopped' };
+    if (!r || (!r.isRunning() && !r.restartTask)) return { state: 'stopped' }; // restartTask: QEMU comes back after a guest restart
     if (force) await r.powerOff(); else await r.shutdown();
     return r.status();
   }
@@ -1470,7 +1470,7 @@ class VmManager {
   }
   /** The extension is updated or switched off: let go of every VM without stopping it (Hostwerk stops them when it quits). */
   detachAll() { for (const r of this.runtimes.values()) if (r.isRunning()) r.detach(); }
-  async stopAll() { await Promise.all([...this.runtimes.values()].filter((r) => r.isRunning()).map((r) => (r.vm.onExit === 'kill' ? r.powerOff() : r.shutdown({ timeout: 45000 })).catch(() => {}))); }
+  async stopAll() { await Promise.all([...this.runtimes.values()].filter((r) => r.isRunning() || r.restartTask).map((r) => (r.vm.onExit === 'kill' ? r.powerOff() : r.shutdown({ timeout: 45000 })).catch(() => {}))); }
 }
 
 module.exports = { VmManager, hashFile, stamp };

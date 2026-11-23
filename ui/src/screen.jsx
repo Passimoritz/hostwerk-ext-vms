@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Keyboard, Maximize2, Camera, MousePointer2, Type, Pause, Play } from 'lucide-react';
+import { Keyboard, Maximize2, Camera, MousePointer2, Type } from 'lucide-react';
 import { apiUrl, post } from '@hostwerk/api';
 import { Btn, Seg, promptDialog, toast } from '@hostwerk/ui';
 import { t } from '@hostwerk/i18n';
@@ -121,8 +121,4 @@ export function Screen({ vm, vbox = false, active = true }) {
       </div>
     </div>
   );
-}
-
-export function PausedNote({ onResume }) {
-  return <div className="row small muted"><Pause size={14} aria-hidden="true" /> {t('The VM is paused.')} <Btn className="btn xs" icon={Play} onClick={onResume}>Resume</Btn></div>;
 }

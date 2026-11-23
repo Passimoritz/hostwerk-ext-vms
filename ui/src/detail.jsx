@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Play, Square, Power, Pause, RotateCcw, Camera, Trash2, Copy, Box, Disc3, Plus, HardDrive, Network, Archive, Terminal, ScrollText, LayoutDashboard, Monitor, Cpu, MemoryStick, History, Download, Upload, Layers, FolderOpen, KeyRound, Settings2, AppWindow, ExternalLink, Sparkles, ArrowLeftRight, Cable, Clock, Disc, Gauge, Globe, Info, Keyboard, Lock, MoreHorizontal, Plug, SlidersHorizontal, StickyNote, SquareTerminal } from 'lucide-react';
+import { Play, Square, Power, Pause, RotateCcw, RotateCw, Camera, Trash2, Copy, Box, Disc3, Plus, HardDrive, Network, Archive, Terminal, ScrollText, LayoutDashboard, Monitor, Cpu, MemoryStick, History, Download, Upload, Layers, FolderOpen, KeyRound, Settings2, AppWindow, ExternalLink, Sparkles, ArrowLeftRight, Cable, Clock, Disc, Gauge, Globe, Info, Keyboard, Lock, MoreHorizontal, Plug, SlidersHorizontal, StickyNote, SquareTerminal } from 'lucide-react';
 import { get, post, put, del, useApi, useLogs, waitJob, pickPath, canPickPath, fmtDate, fmtBytes, apiUrl } from '@hostwerk/api';
 import { Btn, Tabs, StatusPill, Field, Seg, Switch, Callout, Empty, Loading, Modal, confirmDialog, promptDialog, toast, InfoTip, SettingRow, Sparkline } from '@hostwerk/ui';
 import { Console as LogConsole, runInTerminal, useAiReady, openAiPanel, useAiContext } from '@hostwerk/kit';
 import { t } from '@hostwerk/i18n';
-import { Screen, PausedNote } from './screen';
+import { Screen } from './screen';
 import { VncScreen } from './vnc';
 import { STATE, stateOf, isOn, OsIcon, VmLogo, ipOf, Crumbs, mem, gb, copy, run, go } from './common';
 import { removeVm, cloneVm as cloneAction, toggleTemplate, exportVm, moveVm } from './menu';
@@ -15,13 +15,17 @@ import { CreateDialog } from './create';
  * actions on the right, a few main tabs; related views sit together as sub-tabs (screen · serial console · commands,
  * snapshots · backups). Addresses stay #/vms/<id>/<sub>.
  */
+/*
+ * Five tabs by what you want to do: look at it (overview), use it (screen), work in it as text (serial console,
+ * commands, Hostwerk's log of QEMU), keep its state (snapshots, backups), set it up (hardware, network). The sub ids
+ * stay the addresses (#/vms/<id>/hardware …), so old links and the hints in the page still lead to the right place.
+ */
 const groupsOf = (vm) => [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, subs: [['overview']] },
-  ...(vm.template ? [] : [{ id: 'screen', label: 'Screen', icon: Monitor, subs: [['screen', 'Screen', Monitor], ['console', 'Serial console', Terminal], ['guest', 'Commands in the VM', SquareTerminal]] }]),
+  ...(vm.template ? [] : [{ id: 'screen', label: 'Screen', icon: Monitor, subs: [['screen']] }]),
+  { id: 'console', label: 'Console', title: 'Serial console, commands in the VM and log', icon: Terminal, subs: vm.template ? [['log', 'Log', ScrollText]] : [['console', 'Serial console', Terminal], ['guest', 'Commands in the VM', SquareTerminal], ['log', 'Log', ScrollText]] },
   { id: 'snapshots', label: 'Snapshots', title: 'Snapshots & backups', icon: History, badge: (vm.snapshots || []).length || undefined, subs: [['snapshots', 'Snapshots', History], ['backups', 'Backups', Archive]] },
-  { id: 'hardware', label: 'Hardware', icon: Cpu, subs: [['hardware']] },
-  { id: 'network', label: 'Network', icon: Network, subs: [['network']] },
-  { id: 'log', label: 'Log', icon: ScrollText, subs: [['log']] },
+  { id: 'setup', label: 'Settings', title: 'Hardware and network', icon: Settings2, subs: [['hardware', 'Hardware', Cpu], ['network', 'Network', Network]] },
 ];
 
 export function VmDetail({ id, tab, engines, reloadList }) {
@@ -53,6 +57,8 @@ export function VmDetail({ id, tab, engines, reloadList }) {
   const act = (p, body, ok) => run(async () => { await post(`/vms/${id}/${p}`, body); await reload({ silent: true }); reloadList(); }, ok);
   const powerOff = async () => { if (await confirmDialog({ title: t('Power off “{name}”?', { name: vm.name }), text: t('Like pulling the plug – data the VM has not saved is lost.'), confirm: t('Power off'), danger: true })) act('poweroff'); };
   const reset = async () => { if (await confirmDialog({ title: t('Reset “{name}”?', { name: vm.name }), text: t('Restarts the VM at once, like the reset button of a PC – unsaved data is lost.'), confirm: t('Reset'), danger: true })) act('reset'); };
+  // clean restart: the system shuts down by itself, then the VM starts again (the reset button is the hard way)
+  const restart = () => act('restart', {}, 'Restarted');
   const remove = () => removeVm(vm, () => { go(); reloadList(); });
   const cloneVm = (linked) => cloneAction(vm, linked, reloadList);
   const busy = vm.busy || vm.creating;
@@ -78,7 +84,8 @@ export function VmDetail({ id, tab, engines, reloadList }) {
             : !on ? <Btn className="primary" icon={Play} disabled={!!busy || vm.broken || (vm.encryption && vm.encryption.locked)} onClick={() => act('start', {}, null)}>Start</Btn>
               : <>
                 {st === 'paused' ? <Btn icon={Play} onClick={() => act('resume')}>Resume</Btn> : <Btn className="ghost" icon={Pause} disabled={st !== 'running'} onClick={() => act('pause')}>Pause</Btn>}
-                <Btn className="ghost" icon={RotateCcw} title={t('Reset')} aria-label={t('Reset')} disabled={st !== 'running'} onClick={reset} />
+                <Btn className="ghost" icon={RotateCw} disabled={st !== 'running' && st !== 'paused'} title={t('Shuts the system down cleanly and starts it again.')} onClick={restart}>Restart</Btn>
+                <Btn className="ghost" icon={RotateCcw} title={t('Hard reset – like the reset button of a PC')} aria-label={t('Reset')} disabled={st !== 'running'} onClick={reset} />
                 <Btn className="ghost" icon={Power} title={t('Power off')} aria-label={t('Power off')} onClick={powerOff} />
                 <Btn className="primary" icon={Square} disabled={st === 'stopping'} onClick={() => act('stop', {}, 'Shutting down')}>Shut down</Btn>
               </>}
@@ -88,13 +95,13 @@ export function VmDetail({ id, tab, engines, reloadList }) {
       {vm.creating && <Callout kind="info" title={t('The VM is being created')} dismissible={false}>{t('Hostwerk downloads and prepares the disk – this page fills in as soon as it is ready.')}</Callout>}
       {vm.install && vm.install.state === 'running' && <Callout kind="info" title={t('Windows installs itself')} dismissible={false}>{t('This takes about 15–40 minutes and restarts a few times – no need to click anything. Hostwerk switches to booting from the disk as soon as Windows reports through the guest agent.')}</Callout>}
       {vm.status && vm.status.state === 'error' && <Callout kind="err" title={t('The VM stopped with an error')} dismissible={false}>{vm.status.error}{vm.status.hint ? ` – ${vm.status.hint}` : ''} <Btn className="xs" onClick={() => goTab('log')}>Log</Btn></Callout>}
+      {st === 'paused' && <Callout kind="warn" title={t('The VM is paused')} dismissible={false}>{t('It keeps its memory and state but does not run – the screen stands still and the network does not answer. Resume it to go on.')} <Btn className="xs primary" icon={Play} onClick={() => act('resume')}>Resume</Btn></Callout>}
       {vm.encryption && vm.encryption.locked && <Callout kind="warn" title={t('Disk key needed')} dismissible={false}>{t('The disks of this VM are encrypted with a key that is not stored on this PC (moved from another PC or Hostwerk installed again). Enter it under Hardware → Encryption.')} <Btn className="xs" onClick={() => goTab('hardware')}>Hardware</Btn></Callout>}
       <Tabs value={group.id} onChange={(g) => goTab((groups.find((x) => x.id === g) || groups[0]).subs[0][0])} tabs={groups.map(({ subs, ...g }) => ({ ...g, label: t(g.label), title: g.title ? t(g.title) : undefined }))} />
       {group.subs.length > 1 && <div className="sub-tabs"><Seg value={cur} onChange={goTab} options={group.subs.map(([sid, label, icon]) => ({ id: sid, label: t(label), icon }))} /></div>}
       <div className="vm-tab-body">
         {cur === 'overview' && <Overview vm={vm} on={on} engines={engines} onClone={cloneVm} onRemove={remove} reload={reload} reloadList={reloadList} />}
         {cur === 'screen' && (on ? <div className="stack">
-          {st === 'paused' && <PausedNote onResume={() => act('resume')} />}
           {/* fluid VNC screen when QEMU offers it; the PNG screen as fallback (older VMs, paired machines, no connection) */}
           <FileDrop vm={vm}>
             {vm.status && vm.status.ports && vm.status.ports.vnc && !pngScreen

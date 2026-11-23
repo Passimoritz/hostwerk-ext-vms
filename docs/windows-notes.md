@@ -104,6 +104,8 @@ Setup skips missing ones.
   - **Resets pause QEMU** – with WHPX's in-kernel interrupt controller every reset (guest restart or `system_reset`)
     ends in STOP, and `cont` does not help. Windows VMs therefore run with `-no-reboot`: a restart ends QEMU
     (SHUTDOWN guest-reset) and the runtime starts it again at once, without the "press any key" Enter presses.
+    Since 1.2.0 this holds for every x86 VM under WHPX: a UEFI Linux guest hangs on `systemctl reboot` as well
+    (0 % CPU, "Display output is not active", the firmware never starts again).
   - **Panther copies** – the agent can report before the last first-logon command ran, so the delete is now the first
     first-logon command and Hostwerk deletes the copies once more through the guest agent (warning if one is left).
   - The guest agent reports Windows 11 as "Windows 10 …" (`guest-get-osinfo`); WMI says Windows 11.
