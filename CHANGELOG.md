@@ -1,3 +1,9 @@
+## 1.1.0
+
+- Right-click menu of a VM card: also copy, linked clone, template on/off and export (like “Manage” on the VM's page); the overview gets “Move to another PC …”. / Rechtsklickmenü einer VM-Karte: auch Kopieren, verknüpfter Klon, Vorlage an/aus und Exportieren (wie „Verwalten“ auf der Seite der VM); die Übersicht bekommt „Auf anderen PC umziehen …“.
+- The card of a VM that stopped with an error says why; two VMs with the same name get a hint (also when creating one). / Die Karte einer mit Fehler gestoppten VM sagt, warum; zwei VMs mit gleichem Namen bekommen einen Hinweis (auch beim Anlegen).
+- Fixes: Enter and Ctrl+C in the serial console no longer send the line twice; switches that cannot change while the VM runs are shown disabled; the commands tab explains instead of staying empty when the VM is off or the guest agent is missing; a VirtualBox VM removed in VirtualBox gives a readable message; “Type text” names the right keyboard layout; Windows paths in examples show single backslashes. / Behoben: Enter und Strg+C in der seriellen Konsole schicken die Zeile nicht mehr doppelt; Schalter, die sich bei laufender VM nicht ändern lassen, sind gesperrt; der Befehle-Reiter erklärt, statt leer zu bleiben, wenn die VM aus ist oder der Gast-Agent fehlt; eine in VirtualBox entfernte VM gibt eine lesbare Meldung; „Text tippen“ nennt das richtige Tastaturlayout; Windows-Pfade in Beispielen mit einfachen Backslashes.
+
 ## 1.0.6
 
 - Icon and banner in Hostwerk's shared style like the other extensions (dark ground with a glow, a coloured motif – a computer inside the computer with the guest window in front – and the glass tile in the banner). / Symbol und Banner im gemeinsamen Hostwerk-Stil wie die anderen Erweiterungen.
