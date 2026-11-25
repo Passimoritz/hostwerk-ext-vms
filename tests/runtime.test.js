@@ -298,3 +298,89 @@ test('internal networks: a new switch opens on the port QEMU still sends to – 
   await assert.rejects(b.attach('lan', 40003, port + 1), /already open/);
   b.closeAll();
 });
+
+/* ---------------- 1.2.1: the QEMU exit may be handled before QMP's SHUTDOWN (guest-reset) ---------------- */
+/** QEMU ends, the process exit is handled first – only then the socket delivers what QEMU wrote last and closes. */
+function exitBeforeEvents(proc, events) {
+  proc.child = null; proc.state = 'stopped'; proc.resolveExit(); proc.onExit({});
+  for (const s of proc.qmp.state.socks) s.end(events.map((e) => `${JSON.stringify({ ...e, timestamp: {} })}\r\n`).join(''));
+  proc.qmp.server.close();
+}
+
+test('guest restart: SHUTDOWN (guest-reset) read after the process exit still starts QEMU again', async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'disk0.qcow2'), 'x');
+  const { FakeProc, registry } = makeProc();
+  const changes = [];
+  const rt = new Runtime(keepVm('race'), { qhost: keepHost, Proc: FakeProc, registry, dir, onChange: (w) => changes.push(w), portBase: 48100 });
+  await rt.start();
+  assert.equal(rt.rebootByRestart, true);
+  const proc = registry.get('vm-race');
+  const first = proc.qmp;
+  exitBeforeEvents(proc, [{ event: 'SHUTDOWN', data: { guest: true, reason: 'guest-reset' } }]);
+  assert.equal(rt.status().state, 'starting', 'no flicker to "stopped" while QMP is read to the end');
+  await rt.restartTask;
+  assert.equal(rt.status().state, 'running');
+  assert.notEqual(proc.qmp, first, 'a new QEMU was started');
+  assert.ok(changes.includes('restarted'));
+  await rt.powerOff();
+  assert.equal(rt.status().state, 'stopped');
+});
+
+test('guest restart: a process exit without SHUTDOWN (guest-reset) leaves the VM stopped', async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'disk0.qcow2'), 'x');
+  const { FakeProc, registry } = makeProc();
+  const rt = new Runtime(keepVm('crash'), { qhost: keepHost, Proc: FakeProc, registry, dir, portBase: 48120 });
+  await rt.start();
+  const proc = registry.get('vm-crash');
+  const first = proc.qmp;
+  exitBeforeEvents(proc, []);
+  await rt.restartTask;
+  assert.equal(rt.status().state, 'stopped');
+  assert.equal(proc.qmp, first, 'no new start');
+  assert.equal(rt.restarting, false);
+  // a normal guest shutdown that QMP reported before the exit: decided at once, no wait
+  await rt.start();
+  const p2 = registry.get('vm-crash');
+  for (const s of p2.qmp.state.socks) s.write(`${JSON.stringify({ event: 'SHUTDOWN', data: { guest: true, reason: 'guest-shutdown' }, timestamp: {} })}\r\n`);
+  await new Promise((r) => setTimeout(r, 50));
+  p2.exit();
+  assert.equal(rt.status().state, 'stopped');
+  assert.equal(rt.restartTask, null);
+});
+
+test('guest restart: QMP that never closes after the exit – decided after the time limit, VM stopped', async () => {
+  const r = new Runtime({ id: 't', name: 't', osType: 'linux', disks: [] }, { qhost: {}, Proc: class {}, dir: tmp() });
+  const starts = [];
+  r.start = async (o) => { starts.push(o); };
+  r.proc = { info: () => ({ state: 'stopped' }), isRunning: () => false, log() {} };
+  r.rebootByRestart = true;
+  const q = Object.assign(new EventEmitter(), { connected: true, close() { this.connected = false; } });
+  r.qmp = q;
+  r.onQemuExit();
+  assert.equal(r.status().state, 'starting');
+  await r.restartTask;
+  assert.deepEqual(starts, []);
+  assert.equal(r.status().state, 'stopped');
+  assert.equal(r.qmp, null);
+});
+
+test('ensureQmp: a reconnected QMP also delivers events (guest-reset is noticed)', async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'disk0.qcow2'), 'x');
+  const { FakeProc, registry } = makeProc();
+  const rt = new Runtime(keepVm('reco'), { qhost: keepHost, Proc: FakeProc, registry, dir, portBase: 48140 });
+  await rt.start();
+  const proc = registry.get('vm-reco');
+  rt.qmp.close(); rt.qmp = null; // the connection got lost
+  await rt.ensureQmp();
+  assert.ok(rt.qmp && rt.qmp.connected);
+  await new Promise((r) => setTimeout(r, 50));
+  for (const s of proc.qmp.state.socks) if (!s.destroyed) s.write(`${JSON.stringify({ event: 'SHUTDOWN', data: { guest: true, reason: 'guest-reset' }, timestamp: {} })}\r\n`);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(rt.restartPending, true);
+  rt.restartPending = false; rt.restarting = false;
+  await rt.powerOff();
+  assert.equal(rt.status().state, 'stopped');
+});

@@ -63,6 +63,8 @@ class Runtime {
   }
 
   async start({ loadvm = null, afterReset = false } = {}) {
+    // QEMU just ended and onQemuExit still waits for QMP to decide about a restart – let it decide first
+    if (this.exitWait) { await this.exitWait; if (this.restartTask) await this.restartTask; }
     if (this.isRunning()) return this.status();
     const info = await this.qhost.info();
     if (!info.installed) throw U.fail(428, 'QEMU is not installed yet.', null, 'NO_QEMU');
@@ -105,7 +107,7 @@ class Runtime {
       const args = buildArgs(this.vm, { dir: this.dir, accel: arm ? ['tcg'] : info.accelArgs, firmware: fw, ports: this.ports, lanAllowed: this.lanAllowed(), loadvm, nets, keyFile });
       this.accel = arm ? 'tcg' : info.accel;
       this.rebootByRestart = !arm && rebootByRestart(this.vm, info.accelArgs);
-      this.restartPending = false;
+      this.restartPending = false; this.shutdownSeen = false; this.stopRequested = false;
       this.proc = (this.registry && this.registry.get(this.procId)) || this.proc || new this.Proc(this.procId, this.vm.name);
       this.detached = false;
       this.hookProc();
@@ -143,6 +145,7 @@ class Runtime {
 
   onEvent(e) {
     const ev = e.event;
+    if (ev === 'SHUTDOWN') this.shutdownSeen = true;
     if (ev === 'STOP') this.paused = true;
     if (ev === 'RESUME') this.paused = false;
     // -no-reboot: the guest restarts → QEMU ends (SHUTDOWN guest-reset) → onQemuExit starts it again
@@ -163,15 +166,31 @@ class Runtime {
 
   /** QEMU ended: clean up – and after a guest restart (or the reset button) of a -no-reboot VM start it again. */
   onQemuExit() {
+    // The process exit and the QMP socket are independent: SHUTDOWN (guest-reset) may still be unread in the socket
+    // when the exit arrives. Qmp emits every buffered event before 'close', so wait for that (max 2 s) before deciding.
+    // No wait when QEMU already reported its SHUTDOWN, Hostwerk stopped it itself, or the VM does not restart by itself.
+    const q = this.qmp;
+    if (this.restartPending || !this.rebootByRestart || this.shutdownSeen || this.stopRequested || !q || !q.connected) { this.finishExit(); return; }
+    this.restarting = true; // "starting" meanwhile, not a flicker to "stopped" right before the new start
+    this.exitWait = new Promise((resolve) => {
+      const done = () => { clearTimeout(t); q.removeListener('close', done); resolve(); };
+      const t = setTimeout(done, 2000);
+      q.once('close', done);
+    });
+    // stops (settleRestart) wait for the decision and a restart that may follow it
+    this.restartTask = this.exitWait.then(() => { this.exitWait = null; this.restartTask = null; return this.finishExit(); });
+  }
+  finishExit() {
     const again = this.restartPending;
     this.restartPending = false;
     this.cleanup();
-    if (!again) { this.restarting = false; return; }
+    if (!again) { this.restarting = false; return null; }
     if (this.proc) this.proc.log('Guest restarts – Hostwerk starts QEMU again', 'sys');
     if (this.currentVm) { const v = this.currentVm(); if (v) this.vm = v; }
     this.restartTask = this.start({ afterReset: true })
       .catch((e) => { if (this.proc) this.proc.log(`Restart failed: ${e.message}`, 'sys'); })
       .finally(() => { this.restarting = false; this.restartTask = null; this.onChange('restarted'); });
+    return this.restartTask;
   }
 
   /*
@@ -198,7 +217,7 @@ class Runtime {
     try { st = JSON.parse(fs.readFileSync(this.runFile, 'utf8')); } catch { return false; }
     if (!st || !st.ports || !st.ports.qmp) return false;
     this.proc = p; this.ports = st.ports; this.accel = st.accel || null; this.rebootByRestart = !!st.rebootByRestart;
-    this.restartPending = false; this.restarting = false; this.detached = false;
+    this.restartPending = false; this.restarting = false; this.detached = false; this.shutdownSeen = false; this.stopRequested = false;
     for (const k of ['qmp', 'qga', 'serial', 'vnc']) if (this.ports[k]) usedPorts.add(this.ports[k]);
     this.hookProc();
     // Internal networks: this instance's switch is new – it opens on the port QEMU sends to (the old one lets go first)
@@ -238,7 +257,13 @@ class Runtime {
   async ensureQmp() {
     if (this.qmp || !this.ports || !this.ports.qmp || !this.isRunning()) return;
     const q = new Qmp({ port: this.ports.qmp });
-    try { await q.connect(3000); this.qmp = q; q.on('close', () => { if (this.qmp === q) this.qmp = null; }); } catch { /* hard stop after the timeout */ }
+    try {
+      await q.connect(3000);
+      this.qmp = q;
+      // events too – without them a guest-reset after this reconnect would go unnoticed
+      q.on('event', (e) => this.onEvent(e));
+      q.on('close', () => { if (this.qmp === q) this.qmp = null; });
+    } catch { /* hard stop after the timeout */ }
   }
 
   cleanup() {
@@ -264,6 +289,7 @@ class Runtime {
   async shutdown({ timeout = 90000 } = {}) {
     await this.settleRestart();
     if (!this.isRunning()) return;
+    this.stopRequested = true; // our own stop: the exit needs no wait for a guest-reset
     await this.ensureQmp();
     await this.proc.stop({
       timeout,
@@ -278,6 +304,7 @@ class Runtime {
   async powerOff() {
     await this.settleRestart();
     if (!this.isRunning()) return;
+    this.stopRequested = true; // our own stop: the exit needs no wait for a guest-reset
     await this.ensureQmp();
     await this.proc.stop({ timeout: 5000, graceful: async () => { if (this.qmp) await this.qmp.exec('quit').catch(() => {}); } });
   }
