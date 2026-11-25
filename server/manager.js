@@ -841,7 +841,7 @@ class VmManager {
     if (action === 'pause') await r.pause();
     else if (action === 'resume') await r.resume();
     else if (action === 'reset') await r.reset();
-    else if (action === 'combo') await r.combo(String(body.combo || ''));
+    else if (action === 'combo') await r.combo(Array.isArray(body.keys) ? body.keys : String(body.combo || ''));
     else if (action === 'type') await r.typeText(body.text);
     else throw U.fail(400, 'Unknown action.');
     return r.status();

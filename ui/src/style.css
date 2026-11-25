@@ -16,6 +16,19 @@
 .vm-screen.captured .vm-canvas { cursor: none; }
 .vm-screen:fullscreen .vm-canvas { max-height: 100vh; }
 .vm-screen-msg { position: absolute; top: var(--sp-2); left: var(--sp-2); right: var(--sp-2); padding: var(--sp-2); border-radius: var(--r-sm); background: var(--surface); color: var(--err-text); }
+/* Full screen holds the whole card – bar with "Release" and the shortcuts menu stay reachable */
+.vm-screen-card:fullscreen { background: var(--bg); padding: var(--sp-2); height: 100vh; box-sizing: border-box; }
+.vm-screen-card:fullscreen .vm-screen { flex: 1; min-height: 0; border-radius: var(--r-md); }
+.vm-screen-card:fullscreen .vm-canvas { max-height: calc(100vh - 72px); }
+.vm-clip { align-items: center; }
+.vm-combo { position: relative; }
+.vm-combo-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 50; width: min(440px, 90vw); max-height: min(70vh, 520px); overflow: auto; padding: var(--sp-2); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, .25)); display: flex; flex-direction: column; gap: var(--sp-2); }
+.vm-combo-head { padding: 0 var(--sp-1) 2px; }
+.vm-combo-keys { display: flex; flex-wrap: wrap; gap: 4px; }
+.vm-combo-item { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2); color: var(--text); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.vm-combo-group:first-child .vm-combo-item { width: 100%; justify-content: flex-start; margin-bottom: 4px; }
+.vm-combo-item:hover { border-color: var(--accent); }
+.vm-combo-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .vm-serial { margin: 0; height: 420px; overflow: auto; padding: var(--sp-3); background: var(--surface-2); border-radius: var(--r-md); white-space: pre-wrap; word-break: break-all; font-size: var(--fs-xs); }
 .vm-snap.current { background: var(--accent-soft); }

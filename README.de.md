@@ -10,7 +10,7 @@ Virtuelle Maschinen wie mit VirtualBox – nur einfacher und schneller: fertige 
 
 - **In einer Minute fertig** – Cloud-Images von Debian, Ubuntu, AlmaLinux und Fedora mit deinem Benutzer, Passwort oder SSH-Schlüssel, Gast-Agent und passender Plattengröße; Prüfsumme bei jedem Download geprüft
 - **Installation von ISO** – Windows (UEFI, SATA, e1000e), Linux, BSD und alles andere; Installer von Alpine, Debian und Ubuntu mit einem Klick geladen
-- **Bildschirm in Hostwerk** – Maus und Tastatur, Strg+Alt+Entf, Bildschirmfoto, Vollbild; oder ein eigenes Fenster auf diesem PC; dazu die serielle Konsole
+- **Bildschirm in Hostwerk** – Maus und Tastatur (jede Taste geht an die VM, im Vollbild auch Alt+Tab und die Windows-Taste; die rechte Strg-Taste gibt die Tastatur zurück), ein Menü für Strg+Alt+Entf und andere Tasten, die dieser PC für sich behält, eine gemeinsame Zwischenablage in beide Richtungen (Strg+C / Strg+V), Bildschirmfoto, Vollbild; oder ein eigenes Fenster auf diesem PC; dazu die serielle Konsole
 - **Snapshots auch im laufenden Betrieb** – Platten-Snapshots laufender VMs (mit eingefrorenem Dateisystem über den Gast-Agenten), mit Arbeitsspeicher, wo der Beschleuniger es erlaubt
 - **Vorlagen und verknüpfte Klone** – eine VM zur Vorlage machen und daraus in Sekunden neue VMs anlegen
 - **Import** – VirtualBox-VMs (mit CPU, RAM und Platten übernommen), OVA/OVF, VDI, VMDK, VHD(X), qcow2 und Rohabbilder; Export als VDI, VMDK, VHDX oder qcow2
@@ -55,7 +55,8 @@ einen Client annehmen – Hostwerk hält sie, solange eine VM läuft; ein zweite
 abgelehnt“ oder eine Zeitüberschreitung. Stattdessen Hostwerks API nutzen (gleiche Anmeldung wie die Seite, z. B. der
 Header `x-hostwerk-key`): `POST /api/vms/<id>/guest/exec` `{ "command": "…", "timeoutMs": 60000 }` (über den
 Gast-Agenten), `GET|POST /api/vms/<id>/serial`, `GET /api/vms/<id>/screen` (PNG), `POST /api/vms/<id>/type`
-`{ "text": "…" }`, `POST /api/vms/<id>/combo`, `…/restart`, `…/stop`, `…/reset`,
+`{ "text": "…" }`, `POST /api/vms/<id>/combo` `{ "combo": "ctrl-alt-del" }` oder `{ "keys": ["ctrl", "alt", "t"] }`,
+`GET /api/vms/<id>/clipboard?watch=1` (in der VM kopierter Text) und `POST /api/vms/<id>/clipboard` `{ "text": "…" }` (braucht spice-vdagent in der VM), `…/restart`, `…/stop`, `…/reset`,
 `GET /api/vms/<id>/guest/download?path=…` und `POST /api/vms/<id>/guest/upload?name=…` (die Datei als Request-Body).
 
 Oberfläche in `ui/src`, Server-Teil in `server/`. Texte im Code sind Englisch, Deutsch steht in `locales/de.json`.

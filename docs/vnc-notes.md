@@ -145,8 +145,12 @@ Optional, smallest patches (not applied):
   sends a JSON hello; noVNC fails the RFB handshake, never fires `connect` → `onFallback('closed'|'unreachable')`. Works,
   but costs one round trip; checking `vm.ports?.vnc` first avoids it.
 - **Keyboard:** noVNC uses QEMU's extended key events (scancodes), so the guest layout decides – same as the PNG path.
-  Browser shortcuts (Ctrl+W, Ctrl+Alt+Del) cannot be captured → buttons. Releasing capture = click outside (noVNC has no
-  "Esc twice").
+  Since 1.3.0 (`ui/src/keyboard.jsx`, shared by both screens): Right Ctrl on its own releases the keyboard (listener in the
+  capture phase on the container, noVNC still gets the key); in full screen (the whole card, so the bar stays) Keyboard
+  Lock (`navigator.keyboard.lock()`) hands over Alt+Tab, the Windows key and Esc (hold Esc leaves full screen). On
+  focus loss the page also sends `{ t: 'r' }` to `/input` – every modifier up through QMP, so none stays stuck. What
+  no page can catch (Ctrl+Alt+Del, and Ctrl+W/T/N outside full screen in a browser) is in the shortcuts menu, sent with
+  QMP `send-key` through `/combo` (named combos in `server/keys.js`, or `{ keys: [qcodes] }`).
 - **Clipboard:** guest → browser (`onClipboard`) and `Paste` (browser → guest) only work if QEMU has a clipboard backend
   (`-chardev qemu-vdagent,id=vdagent,clipboard=on -device virtio-serial -device virtserialport,chardev=vdagent,name=com.redhat.spice.0`
   and spice-vdagent in the guest). Without it the events are simply not delivered.
@@ -155,6 +159,16 @@ Optional, smallest patches (not applied):
   (caps 0x1b000001: text; request, notify, provide). Windows → PC: notify → request → provide, UTF-8 intact. PC → Windows:
   the client notifies, QEMU requests the text only when Windows pastes, then the client provides it (NUL-terminated
   UTF-8, zlib per message). Text with ä ö ü ß € arrives unchanged both ways.
+  **Since 1.3.0 wired up in the UI:** noVNC's `clipboard` event writes to this PC's clipboard (it was not connected in
+  `detail.jsx` before, so guest → PC never arrived), and this PC's clipboard is offered with `clipboardPasteFrom` when the
+  screen gets the focus (and when the window comes back after Alt+Tab) – Ctrl+C / Ctrl+V work across without a button.
+  A switch "Shared clipboard" (localStorage `hw-vms-clipboard`) turns it off. The simple (PNG) screen uses the server's
+  own clipboard client `server/clipboard.js` (same RFB extended clipboard, no pictures) via `GET /api/vms/<id>/clipboard?watch=1`
+  (`{ helper, ready, text, seq, at }`, polled once a second) and `POST /api/vms/<id>/clipboard { text }`. `helper`
+  comes from QMP `query-chardev` (`frontend-open` of the `vdagent` chardev = spice-vdagent opened its port).
+  Fallback without a helper: "Type the clipboard of this PC" (`/type`, US/German layout).
+  Linux limits: spice-vdagent needs an X11 or XWayland session for the clipboard; GNOME/KDE under pure Wayland may not
+  hand it over – then typing is the way.
 - **Shared sessions:** several tabs may watch the same VM (`shared: true`, max 4 per VM in the bridge, 5th → HTTP 429).
 - **Local exposure:** the VNC port has no password; anything on this PC can connect to 127.0.0.1:<port>. Optional
   hardening: `password=on` + QMP `change-vnc-password` per start, and send the password from the bridge – noVNC

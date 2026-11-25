@@ -232,6 +232,7 @@ class Runtime {
     if (this.proc) { const f = this.runFile; this.proc.onExit = () => { try { fs.rmSync(f, { force: true }); } catch { /* egal */ } }; this.proc.restartFn = null; }
     if (this.qmp) { this.qmp.close(); this.qmp = null; }
     if (this.serial.sock) { try { this.serial.sock.destroy(); } catch { /* egal */ } this.serial.sock = null; }
+    if (this.clip) { this.clip.close(); this.clip = null; }
     this.nets = []; // the switches close with this instance; the new one opens them on the same ports
   }
   /** QMP again after a detach (e.g. Hostwerk quits right after the extension let go) – for shutdown and power-off. */
@@ -317,10 +318,52 @@ class Runtime {
     await this.needQmp().exec('input-send-event', { events: ev });
     return ev.length;
   }
+  /** A shortcut by name (keys.js COMBOS) or as a list of qcodes – pressed together, released in reverse. */
   async combo(name) {
-    const keys = K.COMBOS[name];
-    if (!keys) throw U.fail(400, 'Unknown key combination.');
+    let keys;
+    try { keys = K.comboKeys(name); } catch (e) { throw U.fail(400, e.message); }
     await this.needQmp().exec('send-key', { keys: keys.map((k) => ({ type: 'qcode', data: k })), 'hold-time': 80 });
+  }
+
+  /*
+   * Shared clipboard for the simple screen (the fluid screen's noVNC talks to QEMU's VNC itself). It needs the VNC
+   * server (not with 3D in QEMU's own window) and a clipboard helper in the guest: spice-vdagent, which opens the
+   * com.redhat.spice.0 port – QMP's query-chardev tells whether it did.
+   */
+  clipboard() {
+    if (!this.isRunning() || !this.ports) throw U.fail(409, 'The VM is not running.');
+    if (!this.ports.vnc) throw U.fail(409, 'This VM shows 3D in its own window on this PC – copy and paste work there.');
+    if (!this.clip || this.clip.closed || this.clip.port !== this.ports.vnc) {
+      if (this.clip) this.clip.close();
+      this.clip = new (require('./clipboard').GuestClipboard)({ port: this.ports.vnc });
+      this.clip.on('close', () => { if (!this.isRunning() && this.clip) { this.clip.close(); this.clip = null; } });
+    }
+    return this.clip;
+  }
+  /** Is spice-vdagent in the guest connected? true/false, null when unknown (no agent port, old QEMU). */
+  async clipboardHelper() {
+    if (!this.qmp || !this.isRunning() || !this.ports || !this.ports.qga) return null;
+    try {
+      const list = await this.qmp.exec('query-chardev', undefined, 3000);
+      const c = (Array.isArray(list) ? list : []).find((x) => x && x.label === 'vdagent');
+      return c && typeof c['frontend-open'] === 'boolean' ? c['frontend-open'] : null;
+    } catch { return null; }
+  }
+  /** { helper, ready, text, seq, at } – with `watch` the clipboard connection is opened (and kept while the VM runs). */
+  async clipboardGet({ watch = false } = {}) {
+    const helper = await this.clipboardHelper();
+    if (!watch) return { helper };
+    const c = this.clipboard();
+    await c.connect().catch((e) => { throw U.fail(502, `The clipboard of the VM does not answer (${e.message}).`); });
+    return { helper, ...c.state() };
+  }
+  /** Text from this PC for the guest's next paste. */
+  async clipboardSet(text) {
+    if (typeof text !== 'string') throw U.fail(400, 'Text is missing.');
+    const c = this.clipboard();
+    await c.connect().catch((e) => { throw U.fail(502, `The clipboard of the VM does not answer (${e.message}).`); });
+    try { c.offer(text); } catch (e) { throw U.fail(e.status || 400, e.message); }
+    return { helper: await this.clipboardHelper(), ready: c.ready };
   }
   async typeText(text) {
     const t = String(text || '');
