@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const { Qmp, agent, addressesFrom } = require('./qmp');
 const { buildArgs, rebootByRestart, hostfwdRule, hostfwdKey } = require('./qemu-args');
 const K = require('./keys');
+const { guestClipboard } = require('./guest-clipboard');
 const U = require('./util');
 
 const SERIAL_MAX = 256 * 1024;
@@ -349,21 +350,60 @@ class Runtime {
       return c && typeof c['frontend-open'] === 'boolean' ? c['frontend-open'] : null;
     } catch { return null; }
   }
-  /** { helper, ready, text, seq, at } – with `watch` the clipboard connection is opened (and kept while the VM runs). */
-  async clipboardGet({ watch = false } = {}) {
+  /*
+   * Which way the clipboard goes:
+   *   'vdagent' – QEMU's VNC clipboard ⇄ spice-vdagent (Windows, Linux with X11) – pushed at once
+   *   'agent'   – Linux under Wayland (or without spice-vdagent): the guest agent runs wl-clipboard / Klipper / xclip
+   *               in the user's session (guest-clipboard.js) – fetched while the screen has the keyboard and on release
+   *   'none'    – neither: only typing the text works
+   * spice-vdagentd (the system part) opens the port even under Wayland, where its session part cannot reach the
+   * clipboard – hence the session type decides on Linux, not the open port alone. Asked again after 30 s.
+   */
+  async clipboardMode() {
     const helper = await this.clipboardHelper();
-    if (!watch) return { helper };
+    const fallback = { helper, mode: helper === false ? 'none' : 'vdagent', session: null, tools: [] };
+    if (this.vm.osType === 'windows' || !this.agentInfo || !this.agentInfo.ok || !this.ports || !this.ports.qga) return fallback;
+    if (!this.clipProbe || Date.now() - this.clipProbe.at > 30000) {
+      const r = await guestClipboard((c, a, t) => this.agentCall(c, a, t), 'probe').catch(() => ({ ok: false }));
+      this.clipProbe = { at: Date.now(), ...r };
+    }
+    const p = this.clipProbe;
+    if (!p.ok) return fallback;
+    const out = { ...fallback, session: p.session || null, tools: p.tools || [] };
+    if (p.session === 'x11' && helper === true) return out;
+    if (out.tools.length) return { ...out, mode: 'agent' };
+    return out;
+  }
+  /** { helper, mode, ready, text, seq, at } – with `watch` the text copied in the guest is fetched (VNC connection or agent). */
+  async clipboardGet({ watch = false } = {}) {
+    const m = await this.clipboardMode();
+    if (!watch) return m;
+    if (m.mode === 'agent') {
+      const r = await guestClipboard((c, a, t) => this.agentCall(c, a, t), 'get').catch((e) => ({ ok: false, reason: 'failed', detail: e.message }));
+      const a = this.agentClip || (this.agentClip = { text: null, seq: 0, at: null });
+      if (r.ok && r.text !== a.text) { a.text = r.text; a.seq += 1; a.at = Date.now(); }
+      return { ...m, ready: !!r.ok, reason: r.ok ? null : r.reason, text: a.text || '', seq: a.seq, at: a.at };
+    }
     const c = this.clipboard();
     await c.connect().catch((e) => { throw U.fail(502, `The clipboard of the VM does not answer (${e.message}).`); });
-    return { helper, ...c.state() };
+    return { ...m, ...c.state() };
   }
   /** Text from this PC for the guest's next paste. */
   async clipboardSet(text) {
     if (typeof text !== 'string') throw U.fail(400, 'Text is missing.');
+    const m = await this.clipboardMode();
+    if (m.mode === 'agent') {
+      let r;
+      try { r = await guestClipboard((c, a, t) => this.agentCall(c, a, t), 'set', text); } catch (e) { throw U.fail(e.status || 502, e.message); }
+      if (!r.ok) throw U.fail(502, r.reason === 'no-session' ? 'Nobody is signed in to the desktop of the VM.' : 'The clipboard of the VM could not be set.');
+      const a = this.agentClip || (this.agentClip = { text: null, seq: 0, at: null });
+      a.text = text; // not a copy of the guest's own – the next fetch must not count it as one
+      return { ...m, ready: true };
+    }
     const c = this.clipboard();
     await c.connect().catch((e) => { throw U.fail(502, `The clipboard of the VM does not answer (${e.message}).`); });
     try { c.offer(text); } catch (e) { throw U.fail(e.status || 400, e.message); }
-    return { helper: await this.clipboardHelper(), ready: c.ready };
+    return { ...m, ready: c.ready };
   }
   async typeText(text) {
     const t = String(text || '');

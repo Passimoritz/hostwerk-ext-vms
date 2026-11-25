@@ -4,7 +4,7 @@ import * as hwApi from '@hostwerk/api';
 import { Btn, promptDialog, toast } from '@hostwerk/ui';
 import { t } from '@hostwerk/i18n';
 import RFB from '@novnc/novnc';
-import { ComboMenu, ReleaseButton, KeyboardInfo, ClipboardSwitch, useKeyboardLock, useClipboardPref, useClipboardHelper, releaseTap, readHostClipboard, writeHostClipboard, typeClipboard } from './keyboard';
+import { ComboMenu, ReleaseButton, KeyboardInfo, ClipboardSwitch, useKeyboardLock, useClipboardPref, useClipboardInfo, useServerClipboard, releaseTap, readHostClipboard, writeHostClipboard, typeClipboard } from './keyboard';
 
 /*
  * The VM's screen over VNC (noVNC) – fluid, with the guest's own cursor. The browser talks to /ws/vms/<id>/vnc, which
@@ -48,13 +48,19 @@ export function VncScreen({ vm, onFallback, onClipboard, active = true, viewOnly
   clipOnRef.current = clipOn;
   const clipSeen = useRef({ fromGuest: null, toGuest: null });
   const locked = useKeyboardLock(focused && !viewOnly);
-  const helper = useClipboardHelper(vm && vm.id, clipOn && active && !viewOnly);
+  const clipInfo = useClipboardInfo(vm && vm.id, clipOn && active && !viewOnly);
   const base = `/vms/${vm.id}`;
+  // Linux under Wayland: spice-vdagent cannot reach the clipboard – the guest agent carries it (server/guest-clipboard.js)
+  const agentWay = clipInfo.mode === 'agent';
+  const agentWayRef = useRef(agentWay);
+  agentWayRef.current = agentWay;
+  const serverClip = useServerClipboard({ base, enabled: agentWay && clipOn && active && !viewOnly, poll: focused ? 2000 : 0, captured: focused });
 
   /** This PC's clipboard → the guest (it pastes it with its own Ctrl+V). */
   const toGuest = async () => {
     const rfb = rfbRef.current;
     if (!rfb || viewOnly || !clipOnRef.current) return;
+    if (agentWayRef.current) { serverClip.push(); return; }
     let text;
     try { text = await readHostClipboard(); } catch { return; } // not allowed here – "Paste" still asks visibly
     const s = clipSeen.current;
@@ -184,6 +190,7 @@ export function VncScreen({ vm, onFallback, onClipboard, active = true, viewOnly
   const paste = async () => {
     const rfb = rfbRef.current;
     if (!rfb) return;
+    if (agentWay) { if (await serverClip.push({ loud: true })) toast.success(t('Clipboard sent to the VM – paste it there with Ctrl+V')); refocus(); return; }
     try {
       const text = await readHostClipboard();
       if (!text) { toast.error(t('The clipboard of this PC holds no text.')); return; }
@@ -219,7 +226,8 @@ export function VncScreen({ vm, onFallback, onClipboard, active = true, viewOnly
               : state === 'failed' ? t('Screen connection failed')
                 : viewOnly ? t('View only')
                   : !focused ? t('Click into the screen to use keyboard and mouse')
-                    : locked ? t('All keys go to the VM – Right Ctrl gives them back')
+                    : locked === 'locked' ? t('All keys go to the VM – Right Ctrl gives them back')
+                      : locked === 'denied' ? t('Alt+Tab and the Windows key stay with this PC – send them through “Shortcuts”')
                       : t('Keyboard and mouse go to the VM – Right Ctrl gives them back')}
         </span>
         {!viewOnly && <KeyboardInfo />}
@@ -227,7 +235,7 @@ export function VncScreen({ vm, onFallback, onClipboard, active = true, viewOnly
         {connected && canResize && <span className="badge" title={t('The guest takes the size of this box')}>{t('Auto resolution')}</span>}
         <div className="grow" />
         <div className="row-tight">
-          {!viewOnly && <ClipboardSwitch on={clipOn} onChange={setClipOn} helper={helper} />}
+          {!viewOnly && <ClipboardSwitch on={clipOn} onChange={setClipOn} info={clipInfo} />}
           {!viewOnly && <ComboMenu disabled={!connected} onCombo={combo} onTypeClipboard={() => typeClipboard(base)} onTypeText={typeText} />}
           {!viewOnly && <Btn className="btn ghost xs" icon={ClipboardPaste} disabled={!connected} onClick={paste} title="Send this PC's clipboard to the VM">Paste</Btn>}
           <Btn className="btn ghost xs" icon={Camera} disabled={!connected} onClick={shot} title="Save screenshot">Screenshot</Btn>

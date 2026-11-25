@@ -27,9 +27,13 @@ export const COMBO_GROUPS = [
 
 /* ---------------- Keyboard Lock (only takes effect in full screen) ---------------- */
 const kb = () => (typeof navigator !== 'undefined' && navigator.keyboard && typeof navigator.keyboard.lock === 'function' ? navigator.keyboard : null);
-/** Locks all keys while `on` and the page is in full screen. Returns whether the lock holds. */
+/**
+ * Locks all keys while `on` and the page is in full screen.
+ * Returns 'locked', 'denied' (in full screen, but the browser or an older Hostwerk refuses the lock – Alt+Tab and the
+ * Windows key then stay with this PC) or '' (not in full screen / not wanted).
+ */
 export function useKeyboardLock(on) {
-  const [locked, setLocked] = useState(false);
+  const [state, setState] = useState('');
   const [full, setFull] = useState(typeof document !== 'undefined' && !!document.fullscreenElement);
   useEffect(() => {
     const f = () => setFull(!!document.fullscreenElement);
@@ -37,13 +41,14 @@ export function useKeyboardLock(on) {
     return () => document.removeEventListener('fullscreenchange', f);
   }, []);
   useEffect(() => {
+    if (!on || !full) { setState(''); return undefined; }
     const k = kb();
-    if (!k || !on || !full) { setLocked(false); return undefined; }
+    if (!k) { setState('denied'); return undefined; }
     let alive = true;
-    k.lock().then(() => { if (alive) setLocked(true); }).catch(() => { if (alive) setLocked(false); });
-    return () => { alive = false; try { k.unlock(); } catch { /* ignore */ } setLocked(false); };
+    k.lock().then(() => { if (alive) setState('locked'); }).catch(() => { if (alive) setState('denied'); });
+    return () => { alive = false; try { k.unlock(); } catch { /* ignore */ } setState(''); };
   }, [on, full]);
-  return locked;
+  return state;
 }
 
 /**
@@ -78,20 +83,69 @@ export async function writeHostClipboard(text) {
   await navigator.clipboard.writeText(text);
 }
 
-/** Whether spice-vdagent runs in the guest (true/false/null = unknown), asked now and then. */
-export function useClipboardHelper(vmId, on) {
-  const [helper, setHelper] = useState(null);
+/**
+ * How the VM's clipboard works, asked now and then: { helper, mode, session, tools }
+ *   mode 'vdagent' (QEMU's VNC clipboard ⇄ spice-vdagent), 'agent' (Linux: guest agent + wl-clipboard/Klipper/xclip),
+ *   'none' (only typing), null while unknown. See Runtime.clipboardMode.
+ */
+export function useClipboardInfo(vmId, on) {
+  const [info, setInfo] = useState({ helper: null, mode: null, session: null, tools: [] });
   useEffect(() => {
     if (!on || !vmId) return undefined;
     let alive = true; let timer = null;
     const tick = async () => {
-      try { const r = await get(`/vms/${vmId}/clipboard`); if (alive) setHelper(r && typeof r.helper === 'boolean' ? r.helper : null); } catch { if (alive) setHelper(null); }
+      try { const r = await get(`/vms/${vmId}/clipboard`); if (alive && r) setInfo({ helper: typeof r.helper === 'boolean' ? r.helper : null, mode: r.mode || null, session: r.session || null, tools: r.tools || [] }); } catch { /* VM stopped */ }
       if (alive) timer = setTimeout(tick, 15000);
     };
     tick();
     return () => { alive = false; clearTimeout(timer); };
   }, [vmId, on]);
-  return helper;
+  return info;
+}
+
+/**
+ * Clipboard through the server (GET/POST /api/vms/<id>/clipboard) – the simple screen always, the fluid screen when the
+ * guest agent carries it. push(): this PC's clipboard → VM (when it changed). Text copied in the VM is fetched every
+ * `poll` ms (0 = not) and once when the screen gives the keyboard back – right when you go to paste it on this PC.
+ */
+export function useServerClipboard({ base, enabled, poll, captured }) {
+  const seen = useRef({ seq: null, fromGuest: null, toGuest: null });
+  const pull = useRef(null);
+  pull.current = async () => {
+    const r = await get(`${base}/clipboard?watch=1`);
+    const s = seen.current;
+    if (s.seq == null) { s.seq = r.seq; return; } // what the guest copied before this page opened stays there
+    if (r.seq === s.seq) return;
+    s.seq = r.seq;
+    if (r.text && r.text !== s.toGuest && r.text !== s.fromGuest) { s.fromGuest = r.text; await writeHostClipboard(r.text).catch(() => {}); }
+  };
+  useEffect(() => {
+    if (!enabled || !poll) return undefined;
+    let alive = true; let timer = null;
+    const tick = async () => {
+      let wait = poll;
+      if (!document.hidden) { try { await pull.current(); } catch { wait = Math.max(poll, 5000); } }
+      if (alive) timer = setTimeout(tick, wait);
+    };
+    tick();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [base, enabled, poll]);
+  // the keyboard went back to this PC: fetch once more (a copy right before leaving the VM)
+  const was = useRef(captured);
+  useEffect(() => {
+    if (enabled && was.current && !captured) pull.current().catch(() => {});
+    if (enabled && seen.current.seq == null) pull.current().catch(() => {});
+    was.current = captured;
+  }, [captured, enabled]);
+  const push = async ({ loud = false } = {}) => {
+    let text;
+    try { text = await readHostClipboard(); } catch { if (loud) toast.error(t('The browser does not allow reading the clipboard here.')); return false; }
+    const s = seen.current;
+    if (!text) { if (loud) toast.error(t('The clipboard of this PC holds no text.')); return false; }
+    if (!loud && (text === s.toGuest || text === s.fromGuest)) return false;
+    try { await post(`${base}/clipboard`, { text }); s.toGuest = text; return true; } catch (e) { if (loud) toast.error(e.message); return false; }
+  };
+  return { push, seen };
 }
 
 /** Text of the host clipboard typed into the VM key by key – works without any helper in the guest. */
@@ -164,16 +218,20 @@ export function KeyboardInfo() {
   );
 }
 
-/** Switch for the shared clipboard with the explanation and the state of the helper in the guest. */
-export function ClipboardSwitch({ on, onChange, helper, simple = false }) {
+/** Switch for the shared clipboard with the explanation and the way it works in this VM. */
+export function ClipboardSwitch({ on, onChange, info = {}, simple = false }) {
+  const mode = info.mode;
   return (
     <div className="row-tight small vm-clip">
       <label className="row-tight"><Switch checked={on} onChange={onChange} /> <span>{t('Shared clipboard')}</span></label>
-      {on && helper === false && <span className="badge warn">{t('no helper in the VM')}</span>}
+      {on && mode === 'none' && <span className="badge warn">{t('no helper in the VM')}</span>}
+      {on && mode === 'agent' && <span className="badge">{t('through the guest agent')}</span>}
       <InfoTip pop title={t('Shared clipboard')}>
         {t('Copy in the VM with Ctrl+C and paste here with Ctrl+V – and the other way round: what you copied on this PC is in the VM as soon as you click into the screen.')}{' '}
-        {t('The VM needs a small helper for this: Windows gets it with the guest tools Hostwerk installs, Linux desktops with spice-vdagent (most bring it along; under Wayland not every desktop supports it). Without the helper, “Type the clipboard of this PC” in the shortcuts menu types the text key by key.')}
+        {t('The VM needs a small helper for this: Windows gets it with the guest tools Hostwerk installs, Linux desktops with spice-vdagent (most bring it along; under Wayland not every desktop supports it). Without the helper, “Type the clipboard of this PC” in the shortcuts menu types the text key by key.')}{' '}
+        {t('On Linux under Wayland (KDE, GNOME) Hostwerk goes through the guest agent instead: it uses wl-clipboard, KDE’s clipboard or xclip of the signed-in user. Text copied in the VM then arrives when you leave the screen, or after about two seconds.')}
         {simple ? ` ${t('The simple screen fetches text copied in the VM about once a second.')}` : ''}
+        {on && mode === 'none' && info.session ? ` ${t('Install wl-clipboard (Wayland) or xclip (X11) in the VM to fix this.')}` : ''}
       </InfoTip>
     </div>
   );

@@ -1086,5 +1086,13 @@
   "Ctrl+Tab": "Strg+Tab",
   "Ctrl+Shift+Tab": "Strg+Umschalt+Tab",
   "Ctrl+Q": "Strg+Q",
-  "Ctrl+R": "Strg+R"
+  "Ctrl+R": "Strg+R",
+  "through the guest agent": "über den Gast-Agenten",
+  "On Linux under Wayland (KDE, GNOME) Hostwerk goes through the guest agent instead: it uses wl-clipboard, KDE’s clipboard or xclip of the signed-in user. Text copied in the VM then arrives when you leave the screen, or after about two seconds.": "Unter Linux mit Wayland (KDE, GNOME) geht Hostwerk stattdessen über den Gast-Agenten: Es nutzt wl-clipboard, die KDE-Zwischenablage oder xclip des angemeldeten Nutzers. In der VM kopierter Text kommt dann an, sobald du den Bildschirm verlässt, oder nach etwa zwei Sekunden.",
+  "Install wl-clipboard (Wayland) or xclip (X11) in the VM to fix this.": "Installiere wl-clipboard (Wayland) oder xclip (X11) in der VM, dann klappt es.",
+  "Alt+Tab and the Windows key stay with this PC – send them through “Shortcuts”": "Alt+Tab und die Windows-Taste bleiben bei diesem PC – über „Tastenkürzel“ schicken",
+  "guestClipboard: op must be get, set or probe": "guestClipboard: op muss get, set oder probe sein",
+  "Too much text for the clipboard (256 KB at most through the guest agent).": "Zu viel Text für die Zwischenablage (über den Gast-Agenten höchstens 256 KB).",
+  "Nobody is signed in to the desktop of the VM.": "Am Desktop der VM ist niemand angemeldet.",
+  "The clipboard of the VM could not be set.": "Die Zwischenablage der VM ließ sich nicht setzen."
 }

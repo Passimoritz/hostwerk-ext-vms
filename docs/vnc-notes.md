@@ -167,8 +167,15 @@ Optional, smallest patches (not applied):
   (`{ helper, ready, text, seq, at }`, polled once a second) and `POST /api/vms/<id>/clipboard { text }`. `helper`
   comes from QMP `query-chardev` (`frontend-open` of the `vdagent` chardev = spice-vdagent opened its port).
   Fallback without a helper: "Type the clipboard of this PC" (`/type`, US/German layout).
-  Linux limits: spice-vdagent needs an X11 or XWayland session for the clipboard; GNOME/KDE under pure Wayland may not
-  hand it over – then typing is the way.
+  Linux under Wayland: spice-vdagentd (system part) opens the port, but the session agent cannot reach a Wayland
+  clipboard. `Runtime.clipboardMode()` therefore asks the guest agent for the active session (`server/guest-clipboard.js`,
+  op `probe`: loginctl → session type and the tools there) and picks `agent` for Wayland (or X11 without vdagent):
+  get/set run as the signed-in user via `runuser` with wl-clipboard, Klipper (qdbus) or xclip/xsel; the text goes as
+  guest-exec stdin and comes back as base64. The screens fetch every 2 s only while they hold the keyboard, and once
+  when they let go. Mode `none` (no vdagent, no tool): typing is the way.
+- **Keyboard Lock in Hostwerk's window:** Electron asks the session's permission handler for `keyboardLock`; Hostwerk
+  up to 3.4.1 refused it (only clipboard and full screen were allowed) – then the bar says that Alt+Tab and the Windows
+  key stay with this PC. Hostwerk core commit "Tastatursperre (Keyboard Lock) im Vollbild erlauben" allows it.
 - **Shared sessions:** several tabs may watch the same VM (`shared: true`, max 4 per VM in the bridge, 5th → HTTP 429).
 - **Local exposure:** the VNC port has no password; anything on this PC can connect to 127.0.0.1:<port>. Optional
   hardening: `password=on` + QMP `change-vnc-password` per start, and send the password from the bridge – noVNC

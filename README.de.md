@@ -56,7 +56,7 @@ abgelehnt“ oder eine Zeitüberschreitung. Stattdessen Hostwerks API nutzen (gl
 Header `x-hostwerk-key`): `POST /api/vms/<id>/guest/exec` `{ "command": "…", "timeoutMs": 60000 }` (über den
 Gast-Agenten), `GET|POST /api/vms/<id>/serial`, `GET /api/vms/<id>/screen` (PNG), `POST /api/vms/<id>/type`
 `{ "text": "…" }`, `POST /api/vms/<id>/combo` `{ "combo": "ctrl-alt-del" }` oder `{ "keys": ["ctrl", "alt", "t"] }`,
-`GET /api/vms/<id>/clipboard?watch=1` (in der VM kopierter Text) und `POST /api/vms/<id>/clipboard` `{ "text": "…" }` (braucht spice-vdagent in der VM), `…/restart`, `…/stop`, `…/reset`,
+`GET /api/vms/<id>/clipboard?watch=1` (in der VM kopierter Text) und `POST /api/vms/<id>/clipboard` `{ "text": "…" }` (spice-vdagent in der VM, oder unter Linux der Gast-Agent mit wl-clipboard/Klipper/xclip), `…/restart`, `…/stop`, `…/reset`,
 `GET /api/vms/<id>/guest/download?path=…` und `POST /api/vms/<id>/guest/upload?name=…` (die Datei als Request-Body).
 
 Oberfläche in `ui/src`, Server-Teil in `server/`. Texte im Code sind Englisch, Deutsch steht in `locales/de.json`.

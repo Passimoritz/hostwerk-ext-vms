@@ -1,9 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Maximize2, Minimize2, Camera, MousePointer2, Type, ClipboardPaste } from 'lucide-react';
-import { apiUrl, get, post } from '@hostwerk/api';
+import { apiUrl, post } from '@hostwerk/api';
 import { Btn, Seg, promptDialog, toast } from '@hostwerk/ui';
 import { t } from '@hostwerk/i18n';
-import { ComboMenu, ReleaseButton, KeyboardInfo, ClipboardSwitch, useKeyboardLock, useClipboardPref, useClipboardHelper, releaseTap, readHostClipboard, writeHostClipboard, typeClipboard } from './keyboard';
+import { ComboMenu, ReleaseButton, KeyboardInfo, ClipboardSwitch, useKeyboardLock, useClipboardPref, useClipboardInfo, useServerClipboard, releaseTap, typeClipboard } from './keyboard';
 
 /*
  * The VM's screen inside Hostwerk: QEMU renders into its framebuffer, the page fetches it as PNG (only when it changed –
@@ -29,10 +29,12 @@ export function Screen({ vm, vbox = false, active = true }) {
   const hintId = useId();
   const queue = useRef([]);
   const pressed = useRef(new Set());
-  const clipSeen = useRef({ seq: null, fromGuest: null, toGuest: null });
   const base = vbox ? `/vms/vbox/${vm.uuid}` : `/vms/${vm.id}`;
   const locked = useKeyboardLock(captured && !vbox);
-  const helper = useClipboardHelper(vbox ? null : vm.id, clipOn && active);
+  const clipInfo = useClipboardInfo(vbox ? null : vm.id, clipOn && active);
+  // through the guest agent every fetch starts a program in the VM – only while the screen has the keyboard, and slower
+  const agentWay = clipInfo.mode === 'agent';
+  const clipboard = useServerClipboard({ base, enabled: !vbox && active && clipOn, poll: agentWay ? (captured ? 2000 : 0) : 1000, captured });
 
   // Frames: QEMU on change only (ETag), VirtualBox as a screenshot every few seconds
   useEffect(() => {
@@ -91,35 +93,7 @@ export function Screen({ vm, vbox = false, active = true }) {
   const BTN = ['left', 'middle', 'right'];
 
   /* ---------- shared clipboard ---------- */
-  const toGuest = async () => {
-    if (vbox || !clipOn) return;
-    let text;
-    try { text = await readHostClipboard(); } catch { return; } // not allowed here – "Paste" and "Type the clipboard" still work
-    const s = clipSeen.current;
-    if (!text || text === s.toGuest || text === s.fromGuest) return;
-    try { await post(`${base}/clipboard`, { text }); s.toGuest = text; } catch { /* no clipboard in this VM */ }
-  };
-  useEffect(() => {
-    if (vbox || !active || !clipOn) return undefined;
-    let alive = true; let timer = null;
-    const tick = async () => {
-      let wait = 1000;
-      if (!document.hidden) {
-        try {
-          const r = await get(`${base}/clipboard?watch=1`);
-          const s = clipSeen.current;
-          if (s.seq == null) s.seq = r.seq; // what the guest copied before this page opened stays there
-          else if (r.seq !== s.seq) {
-            s.seq = r.seq;
-            if (r.text && r.text !== s.toGuest) { s.fromGuest = r.text; await writeHostClipboard(r.text).catch(() => {}); }
-          }
-        } catch { wait = 5000; }
-      }
-      if (alive) timer = setTimeout(tick, wait);
-    };
-    tick();
-    return () => { alive = false; clearTimeout(timer); };
-  }, [base, vbox, active, clipOn]);
+  const toGuest = () => { if (!vbox && clipOn) clipboard.push(); }; // not allowed to read here – "Paste" and "Type the clipboard" still work
 
   /* ---------- keyboard ---------- */
   const capture = () => { if (vbox) return; setCaptured(true); if (canvas.current) canvas.current.focus(); toGuest(); };
@@ -159,12 +133,7 @@ export function Screen({ vm, vbox = false, active = true }) {
     try { await post(`${base}/type`, { text }); } catch (e) { toast.error(e.message); }
   };
   const combo = async (c) => { try { await post(vbox ? `${base}/ctrl-alt-del` : `${base}/combo`, { combo: c }); } catch (e) { toast.error(e.message); } if (captured && canvas.current) canvas.current.focus(); };
-  const paste = async () => {
-    let text;
-    try { text = await readHostClipboard(); } catch { toast.error(t('The browser does not allow reading the clipboard here.')); return; }
-    if (!text) { toast.error(t('The clipboard of this PC holds no text.')); return; }
-    try { await post(`${base}/clipboard`, { text }); clipSeen.current.toGuest = text; toast.success(t('Clipboard sent to the VM – paste it there with Ctrl+V')); } catch (e) { toast.error(e.message); }
-  };
+  const paste = async () => { if (await clipboard.push({ loud: true })) toast.success(t('Clipboard sent to the VM – paste it there with Ctrl+V')); };
   const shot = () => { const c = canvas.current; if (!c) return; const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = `${vm.name || 'vm'}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`; a.click(); };
   const full = () => {
     if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
@@ -172,7 +141,8 @@ export function Screen({ vm, vbox = false, active = true }) {
   };
 
   const status = !captured ? t('Click into the screen to use keyboard and mouse')
-    : locked ? t('All keys go to the VM – Right Ctrl gives them back')
+    : locked === 'locked' ? t('All keys go to the VM – Right Ctrl gives them back')
+                      : locked === 'denied' ? t('Alt+Tab and the Windows key stay with this PC – send them through “Shortcuts”')
       : t('Keyboard and mouse go to the VM – Right Ctrl gives them back');
   return (
     <div ref={card} className={`vm-screen-card ${isFull ? 'full' : ''}`}>
@@ -183,7 +153,7 @@ export function Screen({ vm, vbox = false, active = true }) {
         {vbox && <span className="badge">VirtualBox · {t('screenshot every few seconds')}</span>}
         <div className="grow" />
         <div className="row-tight">
-          {!vbox && <ClipboardSwitch on={clipOn} onChange={setClipOn} helper={helper} simple />}
+          {!vbox && <ClipboardSwitch on={clipOn} onChange={setClipOn} info={clipInfo} simple={!agentWay} />}
           <ComboMenu onCombo={combo} only={vbox ? ['ctrl-alt-del'] : null} onTypeClipboard={() => typeClipboard(base)} onTypeText={typeText} />
           {!vbox && <Btn className="btn ghost xs" icon={ClipboardPaste} onClick={paste} title="Send this PC's clipboard to the VM">Paste</Btn>}
           {vbox && <Btn className="btn ghost xs" icon={Type} onClick={typeText}>Type text …</Btn>}

@@ -55,7 +55,7 @@ there. Use Hostwerk's API instead (same login as the page, e.g. the header `x-ho
 `POST /api/vms/<id>/guest/exec` `{ "command": "…", "timeoutMs": 60000 }` (through the guest agent),
 `GET|POST /api/vms/<id>/serial`, `GET /api/vms/<id>/screen` (PNG), `POST /api/vms/<id>/type` `{ "text": "…" }`,
 `POST /api/vms/<id>/combo` `{ "combo": "ctrl-alt-del" }` or `{ "keys": ["ctrl", "alt", "t"] }`,
-`GET /api/vms/<id>/clipboard?watch=1` (text copied in the VM) and `POST /api/vms/<id>/clipboard` `{ "text": "…" }` (needs spice-vdagent in the VM), `…/restart`, `…/stop`, `…/reset`, `GET /api/vms/<id>/guest/download?path=…` and
+`GET /api/vms/<id>/clipboard?watch=1` (text copied in the VM) and `POST /api/vms/<id>/clipboard` `{ "text": "…" }` (spice-vdagent in the VM, or on Linux the guest agent with wl-clipboard/Klipper/xclip), `…/restart`, `…/stop`, `…/reset`, `GET /api/vms/<id>/guest/download?path=…` and
 `POST /api/vms/<id>/guest/upload?name=…` (the file as the request body).
 
 Interface source in `ui/src`, server part in `server/`. Texts in the code are English, German is in `locales/de.json`.
