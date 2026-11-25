@@ -70,6 +70,9 @@ function routes(router, m) {
   router.post('/vms/:id/unlock', h((req) => m.unlock(req.params.id, body(req))));
   for (const a of ['pause', 'resume', 'reset', 'combo', 'type']) router.post(`/vms/:id/${a}`, h((req) => m.control(req.params.id, a, body(req))));
   router.post('/vms/:id/input', h(async (req) => ({ n: await m.rt(U.checkId(req.params.id)).input(body(req).events) })));
+  // Shared clipboard (simple screen and scripts): GET ?watch=1 → { helper, ready, text, seq, at } · POST { text }
+  router.get('/vms/:id/clipboard', h((req) => m.rt(m.get(req.params.id).id).clipboardGet({ watch: req.query.watch === '1' || req.query.watch === 'true' })));
+  router.post('/vms/:id/clipboard', h((req) => m.rt(m.get(req.params.id).id).clipboardSet(body(req).text)));
   router.get('/vms/:id/screen', h(async (req, res) => {
     const shot = await m.rt(m.get(req.params.id).id).screen();
     res.set('ETag', `"${shot.etag}"`).set('Cache-Control', 'no-store');

@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const { Qmp, agent, addressesFrom } = require('./qmp');
 const { buildArgs, rebootByRestart, hostfwdRule, hostfwdKey } = require('./qemu-args');
 const K = require('./keys');
+const { guestClipboard } = require('./guest-clipboard');
 const U = require('./util');
 
 const SERIAL_MAX = 256 * 1024;
@@ -63,6 +64,8 @@ class Runtime {
   }
 
   async start({ loadvm = null, afterReset = false } = {}) {
+    // QEMU just ended and onQemuExit still waits for QMP to decide about a restart – let it decide first
+    if (this.exitWait) { await this.exitWait; if (this.restartTask) await this.restartTask; }
     if (this.isRunning()) return this.status();
     const info = await this.qhost.info();
     if (!info.installed) throw U.fail(428, 'QEMU is not installed yet.', null, 'NO_QEMU');
@@ -105,7 +108,7 @@ class Runtime {
       const args = buildArgs(this.vm, { dir: this.dir, accel: arm ? ['tcg'] : info.accelArgs, firmware: fw, ports: this.ports, lanAllowed: this.lanAllowed(), loadvm, nets, keyFile });
       this.accel = arm ? 'tcg' : info.accel;
       this.rebootByRestart = !arm && rebootByRestart(this.vm, info.accelArgs);
-      this.restartPending = false;
+      this.restartPending = false; this.shutdownSeen = false; this.stopRequested = false;
       this.proc = (this.registry && this.registry.get(this.procId)) || this.proc || new this.Proc(this.procId, this.vm.name);
       this.detached = false;
       this.hookProc();
@@ -143,6 +146,7 @@ class Runtime {
 
   onEvent(e) {
     const ev = e.event;
+    if (ev === 'SHUTDOWN') this.shutdownSeen = true;
     if (ev === 'STOP') this.paused = true;
     if (ev === 'RESUME') this.paused = false;
     // -no-reboot: the guest restarts → QEMU ends (SHUTDOWN guest-reset) → onQemuExit starts it again
@@ -163,15 +167,31 @@ class Runtime {
 
   /** QEMU ended: clean up – and after a guest restart (or the reset button) of a -no-reboot VM start it again. */
   onQemuExit() {
+    // The process exit and the QMP socket are independent: SHUTDOWN (guest-reset) may still be unread in the socket
+    // when the exit arrives. Qmp emits every buffered event before 'close', so wait for that (max 2 s) before deciding.
+    // No wait when QEMU already reported its SHUTDOWN, Hostwerk stopped it itself, or the VM does not restart by itself.
+    const q = this.qmp;
+    if (this.restartPending || !this.rebootByRestart || this.shutdownSeen || this.stopRequested || !q || !q.connected) { this.finishExit(); return; }
+    this.restarting = true; // "starting" meanwhile, not a flicker to "stopped" right before the new start
+    this.exitWait = new Promise((resolve) => {
+      const done = () => { clearTimeout(t); q.removeListener('close', done); resolve(); };
+      const t = setTimeout(done, 2000);
+      q.once('close', done);
+    });
+    // stops (settleRestart) wait for the decision and a restart that may follow it
+    this.restartTask = this.exitWait.then(() => { this.exitWait = null; this.restartTask = null; return this.finishExit(); });
+  }
+  finishExit() {
     const again = this.restartPending;
     this.restartPending = false;
     this.cleanup();
-    if (!again) { this.restarting = false; return; }
+    if (!again) { this.restarting = false; return null; }
     if (this.proc) this.proc.log('Guest restarts – Hostwerk starts QEMU again', 'sys');
     if (this.currentVm) { const v = this.currentVm(); if (v) this.vm = v; }
     this.restartTask = this.start({ afterReset: true })
       .catch((e) => { if (this.proc) this.proc.log(`Restart failed: ${e.message}`, 'sys'); })
       .finally(() => { this.restarting = false; this.restartTask = null; this.onChange('restarted'); });
+    return this.restartTask;
   }
 
   /*
@@ -198,7 +218,7 @@ class Runtime {
     try { st = JSON.parse(fs.readFileSync(this.runFile, 'utf8')); } catch { return false; }
     if (!st || !st.ports || !st.ports.qmp) return false;
     this.proc = p; this.ports = st.ports; this.accel = st.accel || null; this.rebootByRestart = !!st.rebootByRestart;
-    this.restartPending = false; this.restarting = false; this.detached = false;
+    this.restartPending = false; this.restarting = false; this.detached = false; this.shutdownSeen = false; this.stopRequested = false;
     for (const k of ['qmp', 'qga', 'serial', 'vnc']) if (this.ports[k]) usedPorts.add(this.ports[k]);
     this.hookProc();
     // Internal networks: this instance's switch is new – it opens on the port QEMU sends to (the old one lets go first)
@@ -232,13 +252,20 @@ class Runtime {
     if (this.proc) { const f = this.runFile; this.proc.onExit = () => { try { fs.rmSync(f, { force: true }); } catch { /* egal */ } }; this.proc.restartFn = null; }
     if (this.qmp) { this.qmp.close(); this.qmp = null; }
     if (this.serial.sock) { try { this.serial.sock.destroy(); } catch { /* egal */ } this.serial.sock = null; }
+    if (this.clip) { this.clip.close(); this.clip = null; }
     this.nets = []; // the switches close with this instance; the new one opens them on the same ports
   }
   /** QMP again after a detach (e.g. Hostwerk quits right after the extension let go) – for shutdown and power-off. */
   async ensureQmp() {
     if (this.qmp || !this.ports || !this.ports.qmp || !this.isRunning()) return;
     const q = new Qmp({ port: this.ports.qmp });
-    try { await q.connect(3000); this.qmp = q; q.on('close', () => { if (this.qmp === q) this.qmp = null; }); } catch { /* hard stop after the timeout */ }
+    try {
+      await q.connect(3000);
+      this.qmp = q;
+      // events too – without them a guest-reset after this reconnect would go unnoticed
+      q.on('event', (e) => this.onEvent(e));
+      q.on('close', () => { if (this.qmp === q) this.qmp = null; });
+    } catch { /* hard stop after the timeout */ }
   }
 
   cleanup() {
@@ -264,6 +291,7 @@ class Runtime {
   async shutdown({ timeout = 90000 } = {}) {
     await this.settleRestart();
     if (!this.isRunning()) return;
+    this.stopRequested = true; // our own stop: the exit needs no wait for a guest-reset
     await this.ensureQmp();
     await this.proc.stop({
       timeout,
@@ -278,6 +306,7 @@ class Runtime {
   async powerOff() {
     await this.settleRestart();
     if (!this.isRunning()) return;
+    this.stopRequested = true; // our own stop: the exit needs no wait for a guest-reset
     await this.ensureQmp();
     await this.proc.stop({ timeout: 5000, graceful: async () => { if (this.qmp) await this.qmp.exec('quit').catch(() => {}); } });
   }
@@ -317,10 +346,91 @@ class Runtime {
     await this.needQmp().exec('input-send-event', { events: ev });
     return ev.length;
   }
+  /** A shortcut by name (keys.js COMBOS) or as a list of qcodes – pressed together, released in reverse. */
   async combo(name) {
-    const keys = K.COMBOS[name];
-    if (!keys) throw U.fail(400, 'Unknown key combination.');
+    let keys;
+    try { keys = K.comboKeys(name); } catch (e) { throw U.fail(400, e.message); }
     await this.needQmp().exec('send-key', { keys: keys.map((k) => ({ type: 'qcode', data: k })), 'hold-time': 80 });
+  }
+
+  /*
+   * Shared clipboard for the simple screen (the fluid screen's noVNC talks to QEMU's VNC itself). It needs the VNC
+   * server (not with 3D in QEMU's own window) and a clipboard helper in the guest: spice-vdagent, which opens the
+   * com.redhat.spice.0 port – QMP's query-chardev tells whether it did.
+   */
+  clipboard() {
+    if (!this.isRunning() || !this.ports) throw U.fail(409, 'The VM is not running.');
+    if (!this.ports.vnc) throw U.fail(409, 'This VM shows 3D in its own window on this PC – copy and paste work there.');
+    if (!this.clip || this.clip.closed || this.clip.port !== this.ports.vnc) {
+      if (this.clip) this.clip.close();
+      this.clip = new (require('./clipboard').GuestClipboard)({ port: this.ports.vnc });
+      this.clip.on('close', () => { if (!this.isRunning() && this.clip) { this.clip.close(); this.clip = null; } });
+    }
+    return this.clip;
+  }
+  /** Is spice-vdagent in the guest connected? true/false, null when unknown (no agent port, old QEMU). */
+  async clipboardHelper() {
+    if (!this.qmp || !this.isRunning() || !this.ports || !this.ports.qga) return null;
+    try {
+      const list = await this.qmp.exec('query-chardev', undefined, 3000);
+      const c = (Array.isArray(list) ? list : []).find((x) => x && x.label === 'vdagent');
+      return c && typeof c['frontend-open'] === 'boolean' ? c['frontend-open'] : null;
+    } catch { return null; }
+  }
+  /*
+   * Which way the clipboard goes:
+   *   'vdagent' – QEMU's VNC clipboard ⇄ spice-vdagent (Windows, Linux with X11) – pushed at once
+   *   'agent'   – Linux under Wayland (or without spice-vdagent): the guest agent runs wl-clipboard / Klipper / xclip
+   *               in the user's session (guest-clipboard.js) – fetched while the screen has the keyboard and on release
+   *   'none'    – neither: only typing the text works
+   * spice-vdagentd (the system part) opens the port even under Wayland, where its session part cannot reach the
+   * clipboard – hence the session type decides on Linux, not the open port alone. Asked again after 30 s.
+   */
+  async clipboardMode() {
+    const helper = await this.clipboardHelper();
+    const fallback = { helper, mode: helper === false ? 'none' : 'vdagent', session: null, tools: [] };
+    if (this.vm.osType === 'windows' || !this.agentInfo || !this.agentInfo.ok || !this.ports || !this.ports.qga) return fallback;
+    if (!this.clipProbe || Date.now() - this.clipProbe.at > 30000) {
+      const r = await guestClipboard((c, a, t) => this.agentCall(c, a, t), 'probe').catch(() => ({ ok: false }));
+      this.clipProbe = { at: Date.now(), ...r };
+    }
+    const p = this.clipProbe;
+    if (!p.ok) return fallback;
+    const out = { ...fallback, session: p.session || null, tools: p.tools || [] };
+    if (p.session === 'x11' && helper === true) return out;
+    if (out.tools.length) return { ...out, mode: 'agent' };
+    return out;
+  }
+  /** { helper, mode, ready, text, seq, at } – with `watch` the text copied in the guest is fetched (VNC connection or agent). */
+  async clipboardGet({ watch = false } = {}) {
+    const m = await this.clipboardMode();
+    if (!watch) return m;
+    if (m.mode === 'agent') {
+      const r = await guestClipboard((c, a, t) => this.agentCall(c, a, t), 'get').catch((e) => ({ ok: false, reason: 'failed', detail: e.message }));
+      const a = this.agentClip || (this.agentClip = { text: null, seq: 0, at: null });
+      if (r.ok && r.text !== a.text) { a.text = r.text; a.seq += 1; a.at = Date.now(); }
+      return { ...m, ready: !!r.ok, reason: r.ok ? null : r.reason, text: a.text || '', seq: a.seq, at: a.at };
+    }
+    const c = this.clipboard();
+    await c.connect().catch((e) => { throw U.fail(502, `The clipboard of the VM does not answer (${e.message}).`); });
+    return { ...m, ...c.state() };
+  }
+  /** Text from this PC for the guest's next paste. */
+  async clipboardSet(text) {
+    if (typeof text !== 'string') throw U.fail(400, 'Text is missing.');
+    const m = await this.clipboardMode();
+    if (m.mode === 'agent') {
+      let r;
+      try { r = await guestClipboard((c, a, t) => this.agentCall(c, a, t), 'set', text); } catch (e) { throw U.fail(e.status || 502, e.message); }
+      if (!r.ok) throw U.fail(502, r.reason === 'no-session' ? 'Nobody is signed in to the desktop of the VM.' : 'The clipboard of the VM could not be set.');
+      const a = this.agentClip || (this.agentClip = { text: null, seq: 0, at: null });
+      a.text = text; // not a copy of the guest's own – the next fetch must not count it as one
+      return { ...m, ready: true };
+    }
+    const c = this.clipboard();
+    await c.connect().catch((e) => { throw U.fail(502, `The clipboard of the VM does not answer (${e.message}).`); });
+    try { c.offer(text); } catch (e) { throw U.fail(e.status || 400, e.message); }
+    return { ...m, ready: c.ready };
   }
   async typeText(text) {
     const t = String(text || '');

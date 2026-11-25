@@ -841,7 +841,7 @@ class VmManager {
     if (action === 'pause') await r.pause();
     else if (action === 'resume') await r.resume();
     else if (action === 'reset') await r.reset();
-    else if (action === 'combo') await r.combo(String(body.combo || ''));
+    else if (action === 'combo') await r.combo(Array.isArray(body.keys) ? body.keys : String(body.combo || ''));
     else if (action === 'type') await r.typeText(body.text);
     else throw U.fail(400, 'Unknown action.');
     return r.status();
@@ -1183,7 +1183,7 @@ class VmManager {
   async pruneAutoSnaps(id) {
     const vm = this.get(id);
     const keep = (vm.autoSnap && vm.autoSnap.keep) || 24;
-    const autos = Object.entries(vm.snapshots || {}).filter(([, s]) => s.auto).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
+    const autos = Object.entries(vm.snapshots || {}).filter(([, s]) => s.auto).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0) || (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0)); // same millisecond: the name (auto-<time>) decides
     for (const [name] of autos.slice(keep)) await this.deleteSnapshot(id, name);
     return autos.slice(keep).map(([n]) => n);
   }

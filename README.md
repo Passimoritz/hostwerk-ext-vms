@@ -10,7 +10,7 @@ Virtual machines like VirtualBox – only simpler and faster: ready-made Linux V
 
 - **Ready in a minute** – Debian, Ubuntu, AlmaLinux and Fedora cloud images with your user, password or SSH key, guest agent and the right disk size; checksum checked on every download
 - **Install from ISO** – Windows (UEFI, SATA, e1000e), Linux, BSD and everything else; Alpine, Debian and Ubuntu installers downloadable in one click
-- **Screen inside Hostwerk** – mouse and keyboard, Ctrl+Alt+Del, screenshot, full screen; or a separate window on this PC; plus the serial console
+- **Screen inside Hostwerk** – mouse and keyboard (every key goes to the VM, in full screen also Alt+Tab and the Windows key; Right Ctrl gives the keyboard back), a shortcuts menu for Ctrl+Alt+Del and other keys this PC keeps, a shared clipboard both ways (Ctrl+C / Ctrl+V), screenshot, full screen; or a separate window on this PC; plus the serial console
 - **Snapshots even while running** – disk snapshots of running VMs (with a frozen file system through the guest agent), with RAM where the accelerator allows it
 - **Templates and linked clones** – turn a VM into a template and create new VMs from it in seconds
 - **Import** – VirtualBox VMs (taken over with CPU, RAM and disks), OVA/OVF, VDI, VMDK, VHD(X), qcow2 and raw images; export as VDI, VMDK, VHDX or qcow2
@@ -54,7 +54,8 @@ client at a time – Hostwerk holds them while a VM runs, so a second program ge
 there. Use Hostwerk's API instead (same login as the page, e.g. the header `x-hostwerk-key`):
 `POST /api/vms/<id>/guest/exec` `{ "command": "…", "timeoutMs": 60000 }` (through the guest agent),
 `GET|POST /api/vms/<id>/serial`, `GET /api/vms/<id>/screen` (PNG), `POST /api/vms/<id>/type` `{ "text": "…" }`,
-`POST /api/vms/<id>/combo`, `…/restart`, `…/stop`, `…/reset`, `GET /api/vms/<id>/guest/download?path=…` and
+`POST /api/vms/<id>/combo` `{ "combo": "ctrl-alt-del" }` or `{ "keys": ["ctrl", "alt", "t"] }`,
+`GET /api/vms/<id>/clipboard?watch=1` (text copied in the VM) and `POST /api/vms/<id>/clipboard` `{ "text": "…" }` (spice-vdagent in the VM, or on Linux the guest agent with wl-clipboard/Klipper/xclip), `…/restart`, `…/stop`, `…/reset`, `GET /api/vms/<id>/guest/download?path=…` and
 `POST /api/vms/<id>/guest/upload?name=…` (the file as the request body).
 
 Interface source in `ui/src`, server part in `server/`. Texts in the code are English, German is in `locales/de.json`.

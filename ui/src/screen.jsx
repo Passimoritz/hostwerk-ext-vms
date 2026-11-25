@@ -1,27 +1,40 @@
-import { useEffect, useRef, useState } from 'react';
-import { Keyboard, Maximize2, Camera, MousePointer2, Type } from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Maximize2, Minimize2, Camera, MousePointer2, Type, ClipboardPaste } from 'lucide-react';
 import { apiUrl, post } from '@hostwerk/api';
 import { Btn, Seg, promptDialog, toast } from '@hostwerk/ui';
 import { t } from '@hostwerk/i18n';
+import { ComboMenu, ReleaseButton, KeyboardInfo, ClipboardSwitch, useKeyboardLock, useClipboardPref, useClipboardInfo, useServerClipboard, releaseTap, typeClipboard } from './keyboard';
 
 /*
  * The VM's screen inside Hostwerk: QEMU renders into its framebuffer, the page fetches it as PNG (only when it changed –
- * ETag) and draws it on a canvas. Click into the picture to capture keyboard and mouse; Esc twice (or the button) lets
- * go again. Keys go by their physical position (KeyboardEvent.code), so the guest's keyboard layout decides – like a
- * real PC. Shortcuts this PC would catch (Ctrl+Alt+Del …) are buttons.
+ * ETag) and draws it on a canvas. Click into the picture (or Enter on it) to capture keyboard and mouse; Right Ctrl on
+ * its own, the "Release" button or a click outside lets go again. Keys go by their physical position
+ * (KeyboardEvent.code), so the guest's keyboard layout decides – like a real PC. Every key the page sees is kept from
+ * Hostwerk and the browser; in full screen Keyboard Lock hands over Alt+Tab and the Windows key as well. Modifiers still
+ * held when the page loses the keyboard are released in the guest. Shortcuts this PC catches anyway (Ctrl+Alt+Del …)
+ * are in the shortcuts menu.
+ *
+ * Shared clipboard: the server keeps a small VNC connection for the clipboard (server/clipboard.js); the page offers
+ * this PC's clipboard when the screen gets the keyboard and polls for text copied in the guest.
  */
-const COMBOS = [['ctrl-alt-del', 'Ctrl+Alt+Del'], ['ctrl-alt-f1', 'Ctrl+Alt+F1'], ['ctrl-alt-f2', 'Ctrl+Alt+F2'], ['alt-tab', 'Alt+Tab'], ['meta', 'Windows key'], ['alt-f4', 'Alt+F4']];
-
 export function Screen({ vm, vbox = false, active = true }) {
   const canvas = useRef(null);
-  const wrap = useRef(null);
+  const card = useRef(null);
   const [size, setSize] = useState(null);
   const [captured, setCaptured] = useState(false);
   const [fps, setFps] = useState('normal');
   const [err, setErr] = useState(null);
+  const [isFull, setIsFull] = useState(false);
+  const [clipOn, setClipOn] = useClipboardPref();
+  const hintId = useId();
   const queue = useRef([]);
-  const lastEsc = useRef(0);
+  const pressed = useRef(new Set());
   const base = vbox ? `/vms/vbox/${vm.uuid}` : `/vms/${vm.id}`;
+  const locked = useKeyboardLock(captured && !vbox);
+  const clipInfo = useClipboardInfo(vbox ? null : vm.id, clipOn && active);
+  // through the guest agent every fetch starts a program in the VM – only while the screen has the keyboard, and slower
+  const agentWay = clipInfo.mode === 'agent';
+  const clipboard = useServerClipboard({ base, enabled: !vbox && active && clipOn, poll: agentWay ? (captured ? 2000 : 0) : 1000, captured });
 
   // Frames: QEMU on change only (ETag), VirtualBox as a screenshot every few seconds
   useEffect(() => {
@@ -51,6 +64,12 @@ export function Screen({ vm, vbox = false, active = true }) {
     return () => { alive = false; clearTimeout(timer); };
   }, [base, active, fps, vbox]);
 
+  useEffect(() => {
+    const f = () => setIsFull(document.fullscreenElement === card.current);
+    document.addEventListener('fullscreenchange', f);
+    return () => document.removeEventListener('fullscreenchange', f);
+  }, []);
+
   // Input is batched (one request per animation frame)
   const flush = useRef(null);
   const send = (ev) => {
@@ -63,61 +82,104 @@ export function Screen({ vm, vbox = false, active = true }) {
       if (events.length) post(`${base}/input`, { events }).catch(() => {});
     });
   };
+  /** Keys still held go up in the guest (and every modifier, to be sure) – nothing stays stuck after Alt+Tab or a blur. */
+  const letGo = () => {
+    if (vbox) return;
+    for (const c of pressed.current) send({ t: 'k', c, d: false });
+    pressed.current.clear();
+    send({ t: 'r' });
+  };
   const pos = (e) => { const r = canvas.current.getBoundingClientRect(); return { t: 'm', x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }; };
   const BTN = ['left', 'middle', 'right'];
 
+  /* ---------- shared clipboard ---------- */
+  const toGuest = () => { if (!vbox && clipOn) clipboard.push(); }; // not allowed to read here – "Paste" and "Type the clipboard" still work
+
+  /* ---------- keyboard ---------- */
+  const capture = () => { if (vbox) return; setCaptured(true); if (canvas.current) canvas.current.focus(); toGuest(); };
+  const release = () => { letGo(); setCaptured(false); if (canvas.current) canvas.current.blur(); };
+
   useEffect(() => {
     if (!captured || vbox) return undefined;
+    const tap = releaseTap();
     const key = (d) => (e) => {
-      if (e.code === 'Escape' && d) { const now = Date.now(); if (now - lastEsc.current < 400) { setCaptured(false); return; } lastEsc.current = now; }
+      if (e.isComposing) return;
       e.preventDefault(); e.stopPropagation();
+      if (tap(e)) { send({ t: 'k', c: e.code, d: false }); pressed.current.delete(e.code); release(); return; }
+      if (d) pressed.current.add(e.code); else pressed.current.delete(e.code);
       send({ t: 'k', c: e.code, d });
     };
     const down = key(true); const up = key(false);
+    // back to the page after Alt+Tab: the clipboard of this PC may have changed meanwhile
+    const back = () => toGuest();
+    const hide = () => { if (document.hidden) letGo(); };
     window.addEventListener('keydown', down, true);
     window.addEventListener('keyup', up, true);
-    return () => { window.removeEventListener('keydown', down, true); window.removeEventListener('keyup', up, true); };
-  }, [captured, vbox]); // eslint-disable-line react-hooks/exhaustive-deps
+    window.addEventListener('focus', back);
+    document.addEventListener('visibilitychange', hide);
+    return () => {
+      window.removeEventListener('keydown', down, true);
+      window.removeEventListener('keyup', up, true);
+      window.removeEventListener('focus', back);
+      document.removeEventListener('visibilitychange', hide);
+    };
+  }, [captured, vbox, clipOn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const typeText = async () => {
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
     // QEMU types with the layout of the VM (Hardware → Keyboard); VirtualBox always as on a US keyboard
     const text = await promptDialog({ title: t('Type text'), text: vbox ? t('Hostwerk types the text into the VM key by key (US keyboard layout).') : t('Hostwerk types the text into the VM key by key – with the keyboard layout set under Hardware → Keyboard.'), label: t('Text'), confirm: t('Type') });
     if (!text) return;
-    try { await post(vbox ? `${base}/type` : `${base}/type`, { text }); } catch (e) { toast.error(e.message); }
+    try { await post(`${base}/type`, { text }); } catch (e) { toast.error(e.message); }
   };
-  const combo = async (c) => { try { await post(vbox ? `${base}/ctrl-alt-del` : `${base}/combo`, { combo: c }); } catch (e) { toast.error(e.message); } };
+  const combo = async (c) => { try { await post(vbox ? `${base}/ctrl-alt-del` : `${base}/combo`, { combo: c }); } catch (e) { toast.error(e.message); } if (captured && canvas.current) canvas.current.focus(); };
+  const paste = async () => { if (await clipboard.push({ loud: true })) toast.success(t('Clipboard sent to the VM – paste it there with Ctrl+V')); };
   const shot = () => { const c = canvas.current; if (!c) return; const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = `${vm.name || 'vm'}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`; a.click(); };
-  const full = () => { const el = wrap.current; if (el && el.requestFullscreen) el.requestFullscreen().catch(() => {}); };
+  const full = () => {
+    if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
+    const el = card.current; if (el && el.requestFullscreen) el.requestFullscreen().then(() => { if (!vbox) capture(); }).catch(() => {});
+  };
 
+  const status = !captured ? t('Click into the screen to use keyboard and mouse')
+    : locked === 'locked' ? t('All keys go to the VM – Right Ctrl gives them back')
+                      : locked === 'denied' ? t('Alt+Tab and the Windows key stay with this PC – send them through “Shortcuts”')
+      : t('Keyboard and mouse go to the VM – Right Ctrl gives them back');
   return (
-    <div className="vm-screen-card">
+    <div ref={card} className={`vm-screen-card ${isFull ? 'full' : ''}`}>
       <div className="row vm-screen-bar">
-        {!vbox && <span className={`badge ${captured ? 'accent' : ''}`}><MousePointer2 size={13} aria-hidden="true" /> {captured ? t('Keyboard and mouse go to the VM – press Esc twice to release') : t('Click into the screen to use keyboard and mouse')}</span>}
+        {!vbox && <span className={`badge ${captured ? 'accent' : ''}`} role="status" aria-live="polite"><MousePointer2 size={13} aria-hidden="true" /> {status}</span>}
+        {!vbox && <KeyboardInfo />}
+        {!vbox && captured && <ReleaseButton onRelease={release} />}
         {vbox && <span className="badge">VirtualBox · {t('screenshot every few seconds')}</span>}
         <div className="grow" />
         <div className="row-tight">
-          {(vbox ? COMBOS.slice(0, 1) : COMBOS).map(([id, label]) => <Btn key={id} className="btn ghost xs" onClick={() => combo(id)} icon={Keyboard}>{label}</Btn>)}
-          <Btn className="btn ghost xs" icon={Type} onClick={typeText}>Type text …</Btn>
+          {!vbox && <ClipboardSwitch on={clipOn} onChange={setClipOn} info={clipInfo} simple={!agentWay} />}
+          <ComboMenu onCombo={combo} only={vbox ? ['ctrl-alt-del'] : null} onTypeClipboard={() => typeClipboard(base)} onTypeText={typeText} />
+          {!vbox && <Btn className="btn ghost xs" icon={ClipboardPaste} onClick={paste} title="Send this PC's clipboard to the VM">Paste</Btn>}
+          {vbox && <Btn className="btn ghost xs" icon={Type} onClick={typeText}>Type text …</Btn>}
           <Btn className="btn ghost xs" icon={Camera} onClick={shot} title="Save screenshot">Screenshot</Btn>
-          <Btn className="btn ghost xs" icon={Maximize2} onClick={full} title="Full screen">Full screen</Btn>
+          <Btn className="btn ghost xs" icon={isFull ? Minimize2 : Maximize2} onClick={full} title={isFull ? 'Leave full screen' : 'Full screen – all keys go to the VM'}>{isFull ? 'Leave full screen' : 'Full screen'}</Btn>
           {!vbox && <Seg value={fps} onChange={setFps} options={[{ id: 'slow', label: t('Saving') }, { id: 'normal', label: t('Normal') }, { id: 'fast', label: t('Smooth') }]} />}
         </div>
       </div>
-      <div ref={wrap} className={`vm-screen ${captured ? 'captured' : ''}`}>
+      <div className={`vm-screen ${captured ? 'captured' : ''}`}>
         {err && <div className="vm-screen-msg small">{err}</div>}
         <canvas
           ref={canvas}
           tabIndex={0}
           aria-label={t('Screen of {name}', { name: vm.name })}
+          aria-describedby={vbox ? undefined : hintId}
           className="vm-canvas"
           style={size ? { aspectRatio: `${size[0]} / ${size[1]}` } : undefined}
-          onMouseDown={(e) => { if (vbox) return; if (!captured) { setCaptured(true); canvas.current.focus(); return; } e.preventDefault(); send(pos(e)); send({ t: 'b', b: BTN[e.button] || 'left', d: true }); }}
+          onMouseDown={(e) => { if (vbox) return; if (!captured) { capture(); return; } e.preventDefault(); send(pos(e)); send({ t: 'b', b: BTN[e.button] || 'left', d: true }); }}
           onMouseUp={(e) => { if (!captured || vbox) return; send(pos(e)); send({ t: 'b', b: BTN[e.button] || 'left', d: false }); }}
           onMouseMove={(e) => { if (captured && !vbox) send(pos(e)); }}
           onWheel={(e) => { if (!captured || vbox) return; const b = e.deltaY < 0 ? 'wheel-up' : 'wheel-down'; send({ t: 'b', b, d: true }); send({ t: 'b', b, d: false }); }}
+          onKeyDown={(e) => { if (!captured && !vbox && e.key === 'Enter') { e.preventDefault(); capture(); } }}
           onContextMenu={(e) => { if (captured) e.preventDefault(); }}
-          onBlur={() => setCaptured(false)}
+          onBlur={() => { if (captured) { letGo(); setCaptured(false); } }}
         />
+        {!vbox && <span id={hintId} className="sr-only">{t('Press Enter to type in the VM. Right Ctrl on its own gives the keyboard back.')}</span>}
       </div>
     </div>
   );

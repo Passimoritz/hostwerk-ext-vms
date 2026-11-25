@@ -16,6 +16,15 @@ const CODE = {
 for (let i = 0; i < 26; i++) { const c = String.fromCharCode(97 + i); CODE[`Key${c.toUpperCase()}`] = c; }
 for (let i = 0; i <= 9; i++) { CODE[`Digit${i}`] = String(i); CODE[`Numpad${i}`] = `kp_${i}`; }
 for (let i = 1; i <= 12; i++) CODE[`F${i}`] = `f${i}`;
+// Older browsers name the Windows key OSLeft/OSRight; media keys of keyboards that have them
+Object.assign(CODE, {
+  OSLeft: 'meta_l', OSRight: 'meta_r', AudioVolumeMute: 'audiomute', AudioVolumeDown: 'volumedown', AudioVolumeUp: 'volumeup',
+  MediaPlayPause: 'audioplay', MediaStop: 'audiostop', MediaTrackNext: 'audionext', MediaTrackPrevious: 'audioprev',
+});
+/** Every qcode the screen may send – also the check for key lists from outside. */
+const QCODES = new Set(Object.values(CODE));
+/** Modifier qcodes: released all at once when the screen loses the keyboard, so none stays stuck in the guest. */
+const MODIFIERS = ['ctrl', 'ctrl_r', 'shift', 'shift_r', 'alt', 'alt_r', 'meta_l', 'meta_r'];
 
 function qcodeOf(code) { return CODE[String(code)] || null; }
 
@@ -67,17 +76,43 @@ function textToKeys(text, layout = 'us') {
   return out;
 }
 
-/** Shortcuts the screen offers as buttons (they would otherwise be caught by this PC). */
+/**
+ * Shortcuts the screen offers in its menu – the ones this PC, Windows or the browser would catch before the page sees
+ * them (Ctrl+Alt+Del, Alt+Tab, the Windows key …), plus the common ones for people who prefer a click.
+ */
 const COMBOS = {
-  'ctrl-alt-del': ['ctrl', 'alt', 'delete'], 'ctrl-alt-f1': ['ctrl', 'alt', 'f1'], 'ctrl-alt-f2': ['ctrl', 'alt', 'f2'], 'ctrl-alt-f7': ['ctrl', 'alt', 'f7'],
-  'alt-tab': ['alt', 'tab'], 'alt-f4': ['alt', 'f4'], meta: ['meta_l'], 'ctrl-esc': ['ctrl', 'esc'], print: ['print'],
+  'ctrl-alt-del': ['ctrl', 'alt', 'delete'], 'ctrl-shift-esc': ['ctrl', 'shift', 'esc'], 'ctrl-alt-backspace': ['ctrl', 'alt', 'backspace'],
+  'alt-tab': ['alt', 'tab'], 'alt-shift-tab': ['alt', 'shift', 'tab'], 'alt-f4': ['alt', 'f4'], 'alt-f2': ['alt', 'f2'], 'alt-space': ['alt', 'spc'], 'alt-esc': ['alt', 'esc'],
+  meta: ['meta_l'], 'meta-d': ['meta_l', 'd'], 'meta-e': ['meta_l', 'e'], 'meta-l': ['meta_l', 'l'], 'meta-r': ['meta_l', 'r'], 'meta-tab': ['meta_l', 'tab'], 'meta-space': ['meta_l', 'spc'], 'meta-v': ['meta_l', 'v'],
+  'ctrl-esc': ['ctrl', 'esc'], print: ['print'], 'alt-print': ['alt', 'print'],
+  'ctrl-c': ['ctrl', 'c'], 'ctrl-v': ['ctrl', 'v'], 'ctrl-x': ['ctrl', 'x'], 'ctrl-a': ['ctrl', 'a'], 'ctrl-z': ['ctrl', 'z'], 'ctrl-y': ['ctrl', 'y'],
+  'ctrl-shift-c': ['ctrl', 'shift', 'c'], 'ctrl-shift-v': ['ctrl', 'shift', 'v'], 'shift-insert': ['shift', 'insert'],
+  'ctrl-w': ['ctrl', 'w'], 'ctrl-t': ['ctrl', 't'], 'ctrl-n': ['ctrl', 'n'], 'ctrl-shift-t': ['ctrl', 'shift', 't'], 'ctrl-tab': ['ctrl', 'tab'], 'ctrl-shift-tab': ['ctrl', 'shift', 'tab'], 'ctrl-q': ['ctrl', 'q'], 'ctrl-r': ['ctrl', 'r'],
+  f1: ['f1'], f5: ['f5'], f11: ['f11'], f12: ['f12'], esc: ['esc'],
 };
+for (let i = 1; i <= 12; i++) COMBOS[`ctrl-alt-f${i}`] = ['ctrl', 'alt', `f${i}`];
+
+/**
+ * Keys of a combination: a name from COMBOS, or a list of 1–6 different qcodes (["ctrl", "alt", "t"]). Throws 400 for
+ * anything else – nothing unknown reaches QEMU.
+ */
+function comboKeys(combo) {
+  if (Array.isArray(combo)) {
+    const keys = combo.map(String);
+    if (!keys.length || keys.length > 6 || new Set(keys).size !== keys.length || !keys.every((k) => QCODES.has(k))) throw Object.assign(new Error('Unknown key combination.'), { status: 400 });
+    return keys;
+  }
+  const keys = Object.prototype.hasOwnProperty.call(COMBOS, String(combo)) ? COMBOS[String(combo)] : null;
+  if (!keys) throw Object.assign(new Error('Unknown key combination.'), { status: 400 });
+  return keys;
+}
 
 const BUTTONS = { left: 'left', right: 'right', middle: 'middle', 'wheel-up': 'wheel-up', 'wheel-down': 'wheel-down' };
 
 /**
  * Events from the interface → QMP input-send-event events.
  *   { t: 'm', x, y } (0–1)  ·  { t: 'b', b: 'left', d: true }  ·  { t: 'k', c: 'KeyA', d: true }
+ *   { t: 'r' } – let go of every modifier (the page lost the keyboard: blur, Alt+Tab away, released) so none stays stuck
  */
 function toQmpEvents(list) {
   const out = [];
@@ -88,8 +123,9 @@ function toQmpEvents(list) {
       out.push({ type: 'abs', data: { axis: 'x', value: v(e.x) } }, { type: 'abs', data: { axis: 'y', value: v(e.y) } });
     } else if (e.t === 'b' && BUTTONS[e.b]) out.push({ type: 'btn', data: { down: !!e.d, button: BUTTONS[e.b] } });
     else if (e.t === 'k') { const q = qcodeOf(e.c); if (q) out.push({ type: 'key', data: { down: !!e.d, key: { type: 'qcode', data: q } } }); }
+    else if (e.t === 'r') for (const q of MODIFIERS) out.push({ type: 'key', data: { down: false, key: { type: 'qcode', data: q } } });
   }
   return out;
 }
 
-module.exports = { qcodeOf, textToKeys, toQmpEvents, COMBOS, CODE, LAYOUTS };
+module.exports = { qcodeOf, textToKeys, toQmpEvents, comboKeys, COMBOS, CODE, QCODES, MODIFIERS, LAYOUTS };
