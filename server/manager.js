@@ -1183,7 +1183,7 @@ class VmManager {
   async pruneAutoSnaps(id) {
     const vm = this.get(id);
     const keep = (vm.autoSnap && vm.autoSnap.keep) || 24;
-    const autos = Object.entries(vm.snapshots || {}).filter(([, s]) => s.auto).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
+    const autos = Object.entries(vm.snapshots || {}).filter(([, s]) => s.auto).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0) || (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0)); // same millisecond: the name (auto-<time>) decides
     for (const [name] of autos.slice(keep)) await this.deleteSnapshot(id, name);
     return autos.slice(keep).map(([n]) => n);
   }
