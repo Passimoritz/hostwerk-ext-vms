@@ -11,7 +11,11 @@ const fs = require('fs');
 const path = require('path');
 const { pipeline } = require('stream/promises');
 
-function octal(buf, off, len) { const s = buf.toString('ascii', off, off + len).replace(/\0.*$/, '').trim(); return s ? parseInt(s, 8) : 0; }
+function octal(buf, off, len) {
+  // sizes from 8 GiB on are stored base-256 (first bit set) – big appliance disks
+  if (buf[off] & 0x80) { let n = 0; for (let i = off + 1; i < off + len; i++) n = n * 256 + buf[i]; return n; }
+  const s = buf.toString('ascii', off, off + len).replace(/\0.*$/, '').trim(); return s ? parseInt(s, 8) : 0;
+}
 
 function listTar(file) {
   const fd = fs.openSync(file, 'r');
@@ -82,7 +86,8 @@ function parseOvf(xml) {
   const name = decode((x.match(/<(?:ovf:)?Name>([^<]+)</) || [])[1] || vsName || 'Imported VM');
   const osDesc = `${(x.match(/<(?:ovf:)?OperatingSystemSection\b[^>]*>/) || [''])[0]} ${(x.match(/<vbox:OSType[^>]*>([^<]+)</) || [])[1] || ''} ${(x.match(/<(?:ovf:)?Description>([^<]*)</) || [])[1] || ''}`;
   const osType = /windows|win\d/i.test(osDesc) ? 'windows' : /linux|ubuntu|debian|centos|rhel|fedora|alma|rocky|suse|arch/i.test(osDesc) ? 'linux' : 'other';
-  const firmware = /firmware="?efi/i.test(x) || /<Firmware[^>]*type="EFI"/i.test(x) ? 'uefi' : 'bios';
+  // VirtualBox: <Firmware type="EFI"/>; VMware (and Hostwerk's own export): <vmw:Config vmw:key="firmware" vmw:value="efi"/>
+  const firmware = /firmware="?efi/i.test(x) || /<Firmware[^>]*type="EFI"/i.test(x) || /key="firmware"[^>]*value="efi"/i.test(x) ? 'uefi' : 'bios';
   return { name: name.trim().slice(0, 60), cpus, memoryMb, osType, firmware, disks };
 }
 

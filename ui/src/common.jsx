@@ -79,6 +79,15 @@ export function Crumbs({ items }) {
 }
 
 export const mem = (mb) => (mb >= 1024 ? `${Math.round(mb / 102.4) / 10} GB` : `${mb} MB`);
+/** How long since a moment (ms since 1970), short: “4 min”, “2 h 5 min”, “3 d 4 h”. */
+export function since(time, now = Date.now()) {
+  const min = Math.max(0, Math.floor((now - time) / 60000));
+  if (min < 1) return t('less than a minute');
+  if (min < 60) return t('{n} min', { n: min });
+  const h = Math.floor(min / 60);
+  if (h < 24) return t('{h} h {m} min', { h, m: min % 60 });
+  return t('{d} d {h} h', { d: Math.floor(h / 24), h: h % 24 });
+}
 export const gb = (bytes) => (bytes == null ? '–' : fmtBytes(bytes));
 
 export function copy(text) {

@@ -25,6 +25,8 @@ const { Switches } = require('./netswitch');
 const { createShareServer, linuxMountScript, windowsMapCommand } = require('./webdav');
 const { listTaps } = require('./tap');
 const A = require('./apps');
+const GF = require('./guest-files');
+const OVA = require('./ova');
 
 const ISO_RE = /\.(iso|img)$/i;
 const DISK_IMPORT_RE = /\.(qcow2?|vdi|vmdk|vhdx?|img|raw)$/i;
@@ -1143,6 +1145,52 @@ class VmManager {
     }));
   }
 
+  /**
+   * The whole VM as one appliance (OVA): description (CPU, memory, firmware, system), every disk as stream-optimised
+   * VMDK and a manifest with checksums – for VirtualBox, VMware or Proxmox. Snapshots stay here; the disks are written
+   * in their current state (linked clones complete, encrypted disks decrypted).
+   */
+  exportOva(id, { dest } = {}) {
+    const vm = this.get(id);
+    this.requireStopped(id, 'export the VM');
+    if (!vm.disks.length) throw U.fail(400, 'The VM has no disk.');
+    const base = OVA.fileBase(vm.name);
+    let target = path.resolve(String(dest || path.join(os.homedir(), `${base}.ova`)));
+    if (!/\.ova$/i.test(target)) target += '.ova';
+    if (fs.existsSync(target)) throw U.fail(409, 'The file exists already: {path}', { path: target });
+    if (!fs.existsSync(path.dirname(target))) throw U.fail(400, 'The folder does not exist: {path}', { path: path.dirname(target) });
+    return this.runJob(U.T('Export “{name}” as an appliance', { name: vm.name }), (job) => this.withBusy(id, 'Exporting', async () => {
+      const tmp = path.join(this.dirOf(id), '.ova-export');
+      fs.rmSync(tmp, { recursive: true, force: true });
+      fs.mkdirSync(tmp, { recursive: true });
+      try {
+        const disks = [];
+        for (const [i, k] of vm.disks.entries()) {
+          const src = path.join(this.dirOf(id), k.file);
+          const file = `${base}-disk${i + 1}.vmdk`;
+          job.status(U.T('Converting disk {n} …', { n: i + 1 }));
+          const info = await this.qhost.diskInfo(src).catch(() => null);
+          await this.withKey(vm, (key) => this.qhost.convert(src, path.join(tmp, file), { to: 'vmdk', ...(k.encrypted ? { srcKey: key } : {}), onProgress: (p) => job.progress(((i + p / 100) / vm.disks.length) * 80) }));
+          const size = fs.statSync(path.join(tmp, file)).size;
+          disks.push({ file, size, capacity: (info && info.virtualSize) || size });
+        }
+        const ovf = `${base}.ovf`;
+        fs.writeFileSync(path.join(tmp, ovf), OVA.buildOvf(vm, disks));
+        job.status(U.T('Writing the checksums …'));
+        const sums = [];
+        for (const name of [ovf, ...disks.map((d) => d.file)]) sums.push({ name, sha256: await hashFile(path.join(tmp, name), 'sha256') });
+        job.progress(85);
+        job.status(U.T('Packing the appliance …'));
+        const total = disks.reduce((a, d) => a + d.size, 0) || 1;
+        try {
+          // the description first – importers read it before the disks
+          await OVA.writeTar(target, [{ name: ovf, path: path.join(tmp, ovf) }, ...disks.map((d) => ({ name: d.file, path: path.join(tmp, d.file) })), { name: `${base}.mf`, data: OVA.manifestText(sums) }], (n) => job.progress(85 + Math.min(1, n / total) * 15));
+        } catch (e) { fs.rmSync(target, { force: true }); throw e; }
+        return { path: target, disks: disks.length, size: fs.statSync(target).size, decrypted: vm.disks.some((k) => k.encrypted) };
+      } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+    }));
+  }
+
   /** A snapshot name that is not taken yet: base, base-2, base-3 … */
   freeSnapName(id, base) {
     const snaps = this.get(id).snapshots || {};
@@ -1194,6 +1242,65 @@ class VmManager {
     if (!this.isRunning(id)) throw U.fail(409, 'The VM is not running.');
     return this.rt(id).guestExec(command, opts);
   }
+  /* ---------------- Files and users in the guest (through the guest agent) ---------------- */
+  /** The running VM with its connected guest agent – or a clear "not now". */
+  guestRt(id) {
+    const vm = this.get(id);
+    if (!this.isRunning(vm.id)) throw U.fail(409, 'The VM is not running.');
+    const r = this.rt(vm.id);
+    if (!r.agentInfo || !r.agentInfo.ok) throw U.fail(409, 'The guest agent is not connected – this goes through it.');
+    return { vm, r, windows: vm.osType === 'windows' };
+  }
+  async guestRun(r, command, windows, timeout = 30000) {
+    const res = await r.guestExec(command, { timeout, windows });
+    if (res.timedOut) throw U.fail(504, 'The VM did not answer in time.');
+    if (res.code !== 0) throw U.fail(400, 'The VM answered: {reason}', { reason: (res.err || res.out || `exit ${res.code}`).trim().split(/\r?\n/)[0].slice(0, 300) });
+    return res.out;
+  }
+  /** One folder of the VM. dir undefined: the home (desktop) of the VM's user; "" on Windows: the drives. */
+  async guestFiles(id, dir) {
+    const { r, windows } = this.guestRt(id);
+    if (dir === undefined || dir === null) {
+      const home = GF.parentOf((await r.guestTarget('x')).path, windows);
+      try { return GF.parseListing(await this.guestRun(r, GF.listCommand(windows, home), windows), windows); } catch { /* no such home: start at the top */ }
+      return GF.parseListing(await this.guestRun(r, GF.listCommand(windows, windows ? '' : '/'), windows), windows);
+    }
+    const p = GF.checkPath(dir, { empty: windows });
+    return GF.parseListing(await this.guestRun(r, GF.listCommand(windows, p), windows), windows);
+  }
+  async guestMkdir(id, { path: dir, name } = {}) {
+    const { r, windows } = this.guestRt(id);
+    await this.guestRun(r, GF.mkdirCommand(windows, dir, name), windows);
+    return this.guestFiles(id, dir);
+  }
+  async guestDelete(id, target) {
+    const { r, windows } = this.guestRt(id);
+    await this.guestRun(r, GF.deleteCommand(windows, target), windows, 120000);
+    return { ok: true };
+  }
+  /** Where an upload into a chosen folder goes (and, on Linux, whom the file should belong to: the folder's owner). */
+  async guestUploadTarget(id, dir, name) {
+    const { r, windows } = this.guestRt(id);
+    if (!dir) return r.guestTarget(name);
+    const d = GF.checkPath(dir);
+    return { path: GF.joinPath(d, GF.safeName(name), windows), ownerOf: windows ? null : d };
+  }
+  async guestUsers(id) {
+    const { r, windows } = this.guestRt(id);
+    return { users: GF.parseUsers(await this.guestRun(r, GF.usersCommand(windows), windows)) };
+  }
+  /** Sets a user's password in the VM (guest-set-user-password). The password is never logged or stored. */
+  async guestSetPassword(id, { user, password } = {}) {
+    const { r } = this.guestRt(id);
+    const args = GF.passwordArgs(user, password);
+    try { await r.agentCall('guest-set-user-password', args, 30000); } catch (e) {
+      const msg = String(e.message || '');
+      if (/disabled|not supported|CommandNotFound|unsupported/i.test(msg)) throw U.fail(409, 'The guest agent of this VM does not allow setting passwords.');
+      throw U.fail(400, 'The VM refused the new password: {reason}', { reason: msg.split(/\r?\n/)[0].slice(0, 300) });
+    }
+    return { ok: true, user: args.username };
+  }
+
   /** The update command for the guest's distribution (from the agent's OS id). */
   updateCommand(osId) {
     const id = String(osId || '').toLowerCase();

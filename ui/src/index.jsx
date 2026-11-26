@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
-import { Monitor, Plus, Cpu, Settings2, Layers, Play, Square, Power, Pause, RotateCw, Camera, Trash2, Download, Zap, HardDrive, History, Import, Network, Server, ExternalLink, AlertTriangle } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Monitor, Plus, Cpu, Settings2, Layers, Play, Square, Power, Pause, RotateCw, Camera, Trash2, Download, Zap, HardDrive, History, Import, Network, Server, ExternalLink, AlertTriangle, Search } from 'lucide-react';
 import { post, del, put, useApi, waitJob, fmtBytes, fmtDate, openExternal } from '@hostwerk/api';
-import { Btn, Empty, Loading, Callout, StatusPill, Tabs, Switch, SettingRow, TileEmpty, confirmDialog, promptDialog, toast, InfoTip } from '@hostwerk/ui';
+import { Btn, Empty, Loading, Callout, StatusPill, Tabs, Seg, Switch, SettingRow, TileEmpty, confirmDialog, promptDialog, toast, InfoTip } from '@hostwerk/ui';
 import { AddTile } from '@hostwerk/kit';
 import { t } from '@hostwerk/i18n';
 import { CreateDialog } from './create';
 import { VmDetail } from './detail';
 import { Screen } from './screen';
-import { BASE, STATE, stateOf, isOn, OsIcon, VmLogo, ipOf, mem, go, run, Crumbs, nameKey, dupNames } from './common';
+import { BASE, STATE, stateOf, isOn, OsIcon, VmLogo, ipOf, mem, go, run, Crumbs, nameKey, dupNames, since } from './common';
+import { DialogOutlet } from './dialogs';
 import { vmMenu, vboxMenu } from './menu';
 import './style.css';
 
@@ -20,7 +21,12 @@ import './style.css';
  */
 const LIST_TABS = ['virtualbox', 'hyperv', 'settings'];
 
-function VmsPage({ path = [] }) {
+/** The page plus the one place where shared dialogs (snapshot, export – also from the right-click menus) show up. */
+function VmsPage(props) {
+  return <><VmsBody {...props} /><DialogOutlet /></>;
+}
+
+function VmsBody({ path = [] }) {
   const { data, reload, error } = useApi('/vms');
   const { data: engines, reload: reloadEngines } = useApi('/vms/engines', [], { live: false });
   const [creating, setCreating] = useState(() => (/[?&]new=1/.test(location.hash) ? {} : null));
@@ -68,7 +74,7 @@ function VmsPage({ path = [] }) {
       <Tabs value={tab} onChange={(v) => go(v === 'machines' ? '' : v)} tabs={tabs} />
       {error && !data ? <Callout kind="err" dismissible={false}>{error}</Callout> : !data ? <Loading /> : <>
         {tab === 'machines' && (machines.length || templates.length
-          ? <Machines machines={machines} templates={templates} noQemu={noQemu} onNew={newVm} reload={reload} />
+          ? <Machines machines={machines} templates={templates} noQemu={noQemu} onNew={newVm} reload={reload} host={engines && engines.host} />
           : <Welcome noQemu={noQemu} onCreate={() => newVm()} hasVbox={vbox.length > 0} />)}
         {tab === 'virtualbox' && <VboxList list={vbox} installed={vboxInstalled} reload={reload} onImport={(uuid) => newVm({ source: 'vbox', uuid })} />}
         {tab === 'hyperv' && <HypervList hv={hv} />}
@@ -80,14 +86,51 @@ function VmsPage({ path = [] }) {
 }
 
 /* ------------------------------------------------------------------ Machines (service cards) */
-function Machines({ machines, templates, noQemu, onNew, reload }) {
+/** Order of the cards – the choice is kept on this PC. */
+const SORTS = [['name', 'Name'], ['state', 'Running first'], ['recent', 'Last started'], ['memory', 'Memory']];
+const SORT_KEY = 'hw:vms:sort';
+const readSort = () => { try { const v = localStorage.getItem(SORT_KEY); return SORTS.some(([id]) => id === v) ? v : 'name'; } catch { return 'name'; } };
+const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+const ORDER = {
+  name: byName,
+  state: (a, b) => Number(isOn(stateOf(b))) - Number(isOn(stateOf(a))) || byName(a, b),
+  recent: (a, b) => (b.lastStart || 0) - (a.lastStart || 0) || byName(a, b),
+  memory: (a, b) => b.memoryMb - a.memoryMb || byName(a, b),
+};
+/** What the search looks at: name, system, app, address and the notes of a VM. */
+const haystack = (v) => [v.name, v.osLabel, v.osType, v.appInfo && v.appInfo.label, ipOf(v), v.notes].filter(Boolean).join('\n').toLowerCase();
+
+function Machines({ machines, templates, noQemu, onNew, reload, host }) {
+  const [q, setQ] = useState('');
+  const [show, setShow] = useState('all');
+  const [sort, setSortState] = useState(readSort);
+  const setSort = (v) => { setSortState(v); try { localStorage.setItem(SORT_KEY, v); } catch { /* private mode */ } };
   // Gleicher Name zweimal (z. B. zwei „web-01“): auf beiden Karten ein Hinweis
   const dupes = dupNames([...machines, ...templates]);
+  const running = machines.filter((v) => isOn(stateOf(v)));
+  const ramOn = running.reduce((a, v) => a + (v.memoryMb || 0), 0);
+  const needle = q.trim().toLowerCase();
+  // a handful of VMs needs no tools – they show up from the fourth one on
+  const tools = machines.length > 3;
+  const shown = useMemo(() => machines
+    .filter((v) => !tools || ((show === 'all' || (show === 'on') === isOn(stateOf(v))) && (!needle || haystack(v).includes(needle))))
+    .sort(tools ? ORDER[sort] || byName : byName), [machines, tools, show, needle, sort]);
+  const filtered = tools && (!!needle || show !== 'all');
   return (
     <div className="stack">
+      {tools && (
+        <div className="row vm-tools">
+          <div className="input-icon vm-search"><Search aria-hidden="true" /><input className="input sm" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search name, system, address …')} aria-label={t('Search virtual machines')} /></div>
+          <Seg value={show} onChange={setShow} options={[{ id: 'all', label: `${t('All')} ${machines.length}` }, { id: 'on', label: `${t('Running')} ${running.length}` }, { id: 'off', label: `${t('Off')} ${machines.length - running.length}` }]} />
+          <span className="grow" />
+          {running.length > 0 && <span className="small muted" title={t('Memory assigned to the running VMs')}>{host && host.memoryMb ? t('{used} of {total} RAM assigned', { used: mem(ramOn), total: mem(host.memoryMb) }) : t('{used} RAM assigned', { used: mem(ramOn) })}</span>}
+          <label className="row-tight small">{t('Sort by')} <select className="select sm vm-sort" value={sort} onChange={(e) => setSort(e.target.value)}>{SORTS.map(([id, label]) => <option key={id} value={id}>{t(label)}</option>)}</select></label>
+        </div>
+      )}
+      {filtered && !shown.length && <div className="card"><Empty icon={Search} title="No VM matches" text="Nothing fits the search and the filter." action={<Btn onClick={() => { setQ(''); setShow('all'); }}>Show all</Btn>} /></div>}
       <div className="grid grid-auto">
-        {machines.map((v) => <VmCard key={v.id} vm={v} reload={reload} dupName={dupes.has(nameKey(v.name))} />)}
-        {!noQemu && <AddTile onClick={() => onNew()} title={t('Another VM')} text={t('Ready-made Linux in a minute, any ISO or a VirtualBox VM')} chips={[{ label: 'Debian', color: '#d70a53' }, { label: 'Ubuntu', color: '#e95420' }, { label: 'Windows', color: '#0078d4' }, { label: 'ISO', color: '#0ea5e9' }, { label: 'VirtualBox', color: '#2563eb' }]} />}
+        {shown.map((v) => <VmCard key={v.id} vm={v} reload={reload} dupName={dupes.has(nameKey(v.name))} />)}
+        {!noQemu && !filtered && <AddTile onClick={() => onNew()} title={t('Another VM')} text={t('Ready-made Linux in a minute, any ISO or a VirtualBox VM')} chips={[{ label: 'Debian', color: '#d70a53' }, { label: 'Ubuntu', color: '#e95420' }, { label: 'Windows', color: '#0078d4' }, { label: 'ISO', color: '#0ea5e9' }, { label: 'VirtualBox', color: '#2563eb' }]} />}
       </div>
       {templates.length > 0 && <>
         <h3 className="vm-section">{t('Templates')} <InfoTip pop title={t('Templates')}>{t('Set up once, then new VMs from it in seconds as linked clones.')}</InfoTip></h3>
@@ -107,6 +150,9 @@ function VmCard({ vm, reload, onFromTemplate, dupName = false }) {
   const ssh = (vm.net && vm.net.forwards || []).find((f) => f.guest === 22 && f.proto === 'tcp');
   const act = async (p) => { setBusy(p); await run(() => post(`/vms/${vm.id}/${p}`)); setBusy(null); reload({ silent: true }); };
   const app = vm.appInfo && vm.appInfo.open;
+  // while it runs the card shows what the VM uses right now; the size is in the tooltip
+  const stats = st === 'running' && vm.status ? vm.status.stats : null;
+  const up = on && vm.status && vm.status.startedAt ? since(vm.status.startedAt) : null;
   return (
     <div className={`card svc-card vm-card ${s.pill}`} onClick={() => go(vm.id)} onContextMenu={(e) => vmMenu(e, vm, { reload })} title={t('Right-click for more actions')}>
       <div className="svc-top">
@@ -124,7 +170,9 @@ function VmCard({ vm, reload, onFromTemplate, dupName = false }) {
       )}
       {dupName && <div className="tiny c-warn vm-card-dupe" title={t('Two VMs with the same name are hard to tell apart in lists and menus – rename one of them.')}>{t('Name used twice')}</div>}
       <div className="svc-meta">
-        <div><div className="k">{t('Hardware')}</div><div className="v">{vm.cpus} CPU · {mem(vm.memoryMb)}</div></div>
+        {stats
+          ? <div title={[`${vm.cpus} CPU · ${mem(vm.memoryMb)}`, up && t('running for {time}', { time: up })].filter(Boolean).join(' · ')}><div className="k">{t('Load')}</div><div className="v">{Math.round(stats.cpu)} % · {fmtBytes(stats.memory)}</div></div>
+          : <div><div className="k">{t('Hardware')}</div><div className="v">{vm.cpus} CPU · {mem(vm.memoryMb)}</div></div>}
         <div><div className="k">{t('Address')}</div><div className="v mono small">{ip || (ssh ? `SSH :${ssh.host}` : '–')}</div></div>
         <div><div className="k">{t('Snapshots')}</div><div className="v">{(vm.snapshots || []).length}</div></div>
       </div>
@@ -134,7 +182,7 @@ function VmCard({ vm, reload, onFromTemplate, dupName = false }) {
             : !on ? <Btn className="sm primary" icon={Play} busy={busy === 'start'} disabled={vm.broken} onClick={() => act('start')}>Start</Btn>
               : <>
                 {st === 'paused' && <Btn className="sm primary" icon={Play} busy={busy === 'resume'} onClick={() => act('resume')}>Resume</Btn>}
-                <Btn className="sm" icon={Square} busy={busy === 'stop'} onClick={() => act('stop')}>Shut down</Btn>
+                <Btn className="sm" icon={Square} busy={busy === 'stop'} disabled={st === 'stopping'} onClick={() => act('stop')}>Shut down</Btn>
                 <Btn className="sm ghost" icon={RotateCw} busy={busy === 'restart'} disabled={st !== 'running' && st !== 'paused'} title={t('Restart – shuts the system down cleanly and starts it again')} aria-label={t('Restart')} onClick={() => act('restart')} />
                 <Btn className="sm ghost" icon={Monitor} onClick={() => go(`${vm.id}/screen`)}>Screen</Btn>
               </>}

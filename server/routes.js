@@ -98,11 +98,22 @@ function routes(router, m) {
     if (!m.isRunning(vm.id)) throw U.fail(409, 'The VM is not running.');
     const r = m.rt(vm.id);
     if (!r.agentInfo || !r.agentInfo.ok) throw U.fail(409, 'The guest agent is not connected – files go through it.');
-    const target = await r.guestTarget(req.query.name);
+    // ?dir=…: into this folder of the VM (file browser); without: the desktop/home of the VM's user (drag & drop)
+    const target = await m.guestUploadTarget(vm.id, req.query.dir, req.query.name);
     const bytes = await r.guestWriteFile(target.path, req);
-    if (target.owner) await r.guestExec(`chown ${target.owner}: '${target.path.replace(/'/g, "'\\''")}'`, { timeout: 15000 }).catch(() => {});
+    const q = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
+    if (target.owner) await r.guestExec(`chown ${target.owner}: ${q(target.path)}`, { timeout: 15000 }).catch(() => {});
+    // a file put into a folder belongs to whoever owns the folder – not to root, whose files the user could not change
+    if (target.ownerOf) await r.guestExec(`chown "$(stat -c %u:%g ${q(target.ownerOf)})" ${q(target.path)}`, { timeout: 15000 }).catch(() => {});
     return { path: target.path, bytes };
   }));
+  // File browser: one folder of the VM (no ?path: the user's home), a new folder, delete a file or folder
+  router.get('/vms/:id/guest/files', h((req) => m.guestFiles(req.params.id, req.query.path === undefined ? undefined : String(req.query.path))));
+  router.post('/vms/:id/guest/files/mkdir', h((req) => m.guestMkdir(req.params.id, body(req))));
+  router.post('/vms/:id/guest/files/delete', h((req) => m.guestDelete(req.params.id, body(req).path)));
+  // Users of the VM and a new password for one of them (guest agent) – the password is never logged
+  router.get('/vms/:id/guest/users', h((req) => m.guestUsers(req.params.id)));
+  router.post('/vms/:id/guest/password', h((req) => m.guestSetPassword(req.params.id, body(req))));
   // A file out of the VM: streamed to the browser
   router.get('/vms/:id/guest/download', async (req, res) => {
     try {
@@ -138,6 +149,8 @@ function routes(router, m) {
   router.post('/vms/:id/backups/restore', h((req) => job(m.restoreBackup(req.params.id, body(req).file))));
   router.delete('/vms/:id/backups/:file', h((req) => { m.removeBackup(req.params.id, req.params.file); return m.listBackups(req.params.id); }));
   router.post('/vms/:id/export', h((req) => job(m.exportDisk(req.params.id, body(req)))));
+  // The whole VM as one appliance file (OVA) for VirtualBox, VMware, Proxmox
+  router.post('/vms/:id/export-ova', h((req) => job(m.exportOva(req.params.id, body(req)))));
 }
 
 module.exports = { routes };

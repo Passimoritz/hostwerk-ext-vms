@@ -96,7 +96,7 @@ function cleanVm(input, { prev = null, host = { cpus: 8, memoryMb: 16384 }, lanA
     cpus,
     memoryMb,
     firmware: pick(b.firmware ?? base.firmware, ['bios', 'uefi'], d.firmware),
-    vga: pick(b.vga ?? base.vga, ['std', 'virtio', 'virtio-gl'], d.vga), // virtio-gl = 3D (virgl), only in an own window
+    vga: pick(b.vga ?? base.vga, VGA_MODELS, d.vga), // virtio-gl = 3D (virgl), only in an own window
     sound: !!(b.sound ?? base.sound),
     display: pick(b.display ?? base.display, ['web', 'window'], 'web'),
     boot: pick(b.boot ?? base.boot, ['disk', 'cdrom'], 'disk'),
@@ -133,6 +133,11 @@ function cleanVm(input, { prev = null, host = { cpus: 8, memoryMb: 16384 }, lanA
     currentSnapshot: base.currentSnapshot || null,
     createdAt: base.createdAt || Date.now(),
   };
+  // Graphics options: fields only when chosen (descriptions of VMs without them stay as they were)
+  const vram = cleanVram(b.vramMb !== undefined ? b.vramMb : base.vramMb);
+  const res = cleanResolution(b.resolution !== undefined ? b.resolution : base.resolution);
+  if (vram && VRAM_FOR.includes(vm.vga)) vm.vramMb = vram; else delete vm.vramMb;
+  if (res && RES_FOR.includes(vm.vga)) vm.resolution = res; else delete vm.resolution;
   // ARM (#22): field only on ARM VMs (x86 descriptions stay as they were); UEFI, no SATA, virtio graphics
   if (arch === 'aarch64') {
     vm.arch = 'aarch64';
@@ -146,6 +151,30 @@ function cleanVm(input, { prev = null, host = { cpus: 8, memoryMb: 16384 }, lanA
   const cds = vm.drivers ? 3 : 2; // CD drive + seed (+ driver CD for Windows)
   if (vm.disks.filter((k) => k.bus === 'sata').length + cds > 6) throw fail(400, 'At most {n} SATA disks (the controller has 6 ports, {cds} are for CD drives).', { n: 6 - cds, cds });
   return vm;
+}
+
+/*
+ * Graphics cards: std (VGA, works everywhere), virtio (fast with Linux), virtio-gl (3D in an own window), qxl (with
+ * the SPICE/QXL driver: Windows guest tools, Linux), vmware (VMware SVGA – for systems that bring that driver),
+ * cirrus (old systems: Windows 9x/NT, DOS). Video memory only where the card has it, a start resolution only where
+ * the card can tell the system its preferred size.
+ */
+const VGA_MODELS = ['std', 'virtio', 'virtio-gl', 'qxl', 'vmware', 'cirrus'];
+const VRAM_FOR = ['std', 'qxl', 'vmware'];
+const RES_FOR = ['std', 'virtio', 'virtio-gl', 'qxl'];
+const VRAM_STEPS = [16, 32, 64, 128, 256];
+function cleanVram(v) {
+  if (v === undefined || v === null || v === '' || Number(v) === 0) return 0;
+  const n = Number(v);
+  if (!VRAM_STEPS.includes(n)) throw fail(400, 'Video memory: 16, 32, 64, 128 or 256 MB.');
+  return n;
+}
+function cleanResolution(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (!s || s === 'auto') return '';
+  const m = /^(\d{3,4})x(\d{3,4})$/.exec(s);
+  if (!m || Number(m[1]) < 640 || Number(m[1]) > 3840 || Number(m[2]) < 480 || Number(m[2]) > 2160) throw fail(400, 'Resolution: width x height, from 640x480 to 3840x2160.');
+  return `${Number(m[1])}x${Number(m[2])}`;
 }
 
 /** Automatic snapshots: how often and how many to keep. `last` (time of the last one) is kept from the stored VM. */
@@ -265,4 +294,4 @@ function memoryCheck(runningMb, wantMb, hostMb) {
   return { total, ratio: Math.round(ratio * 100) / 100, level: ratio > 0.9 ? 'err' : ratio > 0.75 ? 'warn' : 'ok' };
 }
 
-module.exports = { ARCHES, cleanNets, cleanShares, checkCidr, NET_ID_RE, NET_MODES, MAX_NETS, MAX_SHARES, cleanAutoSnap, cleanLimits, affinityMask, SNAP_EVERY, cleanVm, cleanDisk, cleanForward, checkForwards, checkSnapName, diskBytes, defaultsFor, publicVm, memoryCheck, OS_TYPES, BUSES, NIC_MODELS, DISK_FORMATS, clamp };
+module.exports = { VGA_MODELS, VRAM_FOR, RES_FOR, VRAM_STEPS, cleanVram, cleanResolution, ARCHES, cleanNets, cleanShares, checkCidr, NET_ID_RE, NET_MODES, MAX_NETS, MAX_SHARES, cleanAutoSnap, cleanLimits, affinityMask, SNAP_EVERY, cleanVm, cleanDisk, cleanForward, checkForwards, checkSnapName, diskBytes, defaultsFor, publicVm, memoryCheck, OS_TYPES, BUSES, NIC_MODELS, DISK_FORMATS, clamp };

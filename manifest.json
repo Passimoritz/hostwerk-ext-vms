@@ -9,7 +9,7 @@
     "de": "Virtuelle Maschinen wie mit VirtualBox – nur einfacher und schneller: fertige Linux-VMs in rund einer Minute (Cloud-Image mit Benutzer, SSH-Schlüssel und Gast-Agent), Installation von ISO (Windows, Linux, alles andere), Import aus VirtualBox, VMware und Hyper-V. Bildschirm direkt in Hostwerk mit Maus und Tastatur, serielle Konsole, Snapshots auch im laufenden Betrieb, Vorlagen mit verknüpften Klonen in Sekunden, Portweiterleitungen live, Sicherungen, Autostart und Hardware-Beschleunigung (WHPX, KVM, HVF) über QEMU. Vorhandene VirtualBox-VMs gleich mit im Blick.",
     "en": "Virtual machines like VirtualBox – only simpler and faster: ready-made Linux VMs in about a minute (cloud image with user, SSH key and guest agent), installing from an ISO (Windows, Linux, anything else), import from VirtualBox, VMware and Hyper-V. The screen right inside Hostwerk with mouse and keyboard, serial console, snapshots even while running, templates with linked clones in seconds, live port forwarding, backups, autostart and hardware acceleration (WHPX, KVM, HVF) through QEMU. Existing VirtualBox VMs at a glance as well."
   },
-  "version": "1.3.0",
+  "version": "1.4.0",
   "author": "Hostwerk",
   "homepage": "https://github.com/Passimoritz/hostwerk-ext-vms",
   "license": "MIT",

@@ -156,7 +156,15 @@ function buildArgs(vm, opts) {
   // VNC and no screendump next to that OpenGL context. Verified on Windows (QEMU 11.1, WHPX): the guest's GL renderer is
   // "virgl (AMD Radeon RX 9070 XT)", glmark2 ≈ 96 fps. In the Hostwerk screen 3D falls back to plain virtio (see glMode).
   const gl = glMode(vm);
-  if (gl) add('-device', 'virtio-vga-gl'); else add('-vga', vm.vga === 'virtio' || vm.vga === 'virtio-gl' ? 'virtio' : 'std');
+  if (gl) add('-device', 'virtio-vga-gl'); else add('-vga', vm.vga === 'virtio' || vm.vga === 'virtio-gl' ? 'virtio' : ['qxl', 'vmware', 'cirrus'].includes(vm.vga) ? vm.vga : 'std');
+  // Graphics options as -global (the card keeps its place on the PCI bus – nothing moves for the guest): video
+  // memory, and the size the card reports as preferred (the system starts in it, without setting it in the guest)
+  {
+    const dev = gl ? 'virtio-vga-gl' : { std: 'VGA', virtio: 'virtio-vga', 'virtio-gl': 'virtio-vga', qxl: 'qxl-vga', vmware: 'vmware-svga' }[vm.vga];
+    const res = /^(\d+)x(\d+)$/.exec(vm.resolution || '');
+    if (dev && vm.vramMb && ['VGA', 'qxl-vga', 'vmware-svga'].includes(dev)) add('-global', `${dev}.vgamem_mb=${Number(vm.vramMb)}`);
+    if (dev && res && dev !== 'vmware-svga') add('-global', `${dev}.xres=${Number(res[1])}`, '-global', `${dev}.yres=${Number(res[2])}`);
+  }
   const disp = displayFor(vm, platform);
   if (gl) disp[1] = `${disp[1]},gl=on`;
   add(...disp);

@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Play, Square, Power, Pause, RotateCcw, RotateCw, Camera, Trash2, Copy, Box, Disc3, Plus, HardDrive, Network, Archive, Terminal, ScrollText, LayoutDashboard, Monitor, Cpu, MemoryStick, History, Download, Upload, Layers, FolderOpen, KeyRound, Settings2, AppWindow, ExternalLink, Sparkles, ArrowLeftRight, Cable, Clock, Disc, Gauge, Globe, Info, Keyboard, Lock, MoreHorizontal, Plug, SlidersHorizontal, StickyNote, SquareTerminal } from 'lucide-react';
-import { get, post, put, del, useApi, useLogs, waitJob, pickPath, canPickPath, fmtDate, fmtBytes, apiUrl } from '@hostwerk/api';
+import { Play, Square, Power, Pause, RotateCcw, RotateCw, Camera, Trash2, Copy, Box, Disc3, Plus, HardDrive, Network, Archive, Terminal, ScrollText, LayoutDashboard, Monitor, Cpu, History, Download, Upload, Layers, FolderOpen, KeyRound, Settings2, AppWindow, ExternalLink, Sparkles, ArrowLeftRight, Cable, Clock, Disc, Gauge, Globe, Info, Keyboard, Lock, PenLine, Plug, SlidersHorizontal, StickyNote, SquareTerminal, Eraser } from 'lucide-react';
+import { get, post, put, del, useApi, useLogs, waitJob, pickPath, canPickPath, fmtDate, fmtBytes, apiUrl, openExternal } from '@hostwerk/api';
 import { Btn, Tabs, StatusPill, Field, Seg, Switch, Callout, Empty, Loading, Modal, confirmDialog, promptDialog, toast, InfoTip, SettingRow, Sparkline } from '@hostwerk/ui';
 import { Console as LogConsole, runInTerminal, useAiReady, openAiPanel, useAiContext } from '@hostwerk/kit';
 import { t } from '@hostwerk/i18n';
 import { Screen } from './screen';
 import { VncScreen } from './vnc';
-import { STATE, stateOf, isOn, OsIcon, VmLogo, ipOf, Crumbs, mem, gb, copy, run, go } from './common';
-import { removeVm, cloneVm as cloneAction, toggleTemplate, exportVm, moveVm } from './menu';
+import { STATE, stateOf, isOn, OsIcon, VmLogo, ipOf, Crumbs, mem, gb, copy, run, go, since } from './common';
+import { removeVm, cloneVm as cloneAction, toggleTemplate, moveVm } from './menu';
+import { renameVm, takeSnapshot, exportVm, resetPassword } from './dialogs';
+import { GuestFiles } from './files';
 import { CreateDialog } from './create';
 
 /*
@@ -23,7 +25,7 @@ import { CreateDialog } from './create';
 const groupsOf = (vm) => [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, subs: [['overview']] },
   ...(vm.template ? [] : [{ id: 'screen', label: 'Screen', icon: Monitor, subs: [['screen']] }]),
-  { id: 'console', label: 'Console', title: 'Serial console, commands in the VM and log', icon: Terminal, subs: vm.template ? [['log', 'Log', ScrollText]] : [['console', 'Serial console', Terminal], ['guest', 'Commands in the VM', SquareTerminal], ['log', 'Log', ScrollText]] },
+  { id: 'console', label: 'Console', title: 'Serial console, commands in the VM and log', icon: Terminal, subs: vm.template ? [['log', 'Log', ScrollText]] : [['console', 'Serial console', Terminal], ['guest', 'Commands in the VM', SquareTerminal], ['files', 'Files', FolderOpen], ['log', 'Log', ScrollText]] },
   { id: 'snapshots', label: 'Snapshots', title: 'Snapshots & backups', icon: History, badge: (vm.snapshots || []).length || undefined, subs: [['snapshots', 'Snapshots', History], ['backups', 'Backups', Archive]] },
   { id: 'setup', label: 'Settings', title: 'Hardware and network', icon: Settings2, subs: [['hardware', 'Hardware', Cpu], ['network', 'Network', Network]] },
 ];
@@ -119,7 +121,8 @@ export function VmDetail({ id, tab, engines, reloadList }) {
           : <div className="card"><Empty icon={Monitor} title="The VM is off" text="Start it to see its screen." action={<Btn className="primary" icon={Play} disabled={!!busy || vm.broken} onClick={() => act('start')}>Start</Btn>} /></div>)}
         {cur === 'console' && <SerialConsole vm={vm} on={on} />}
         {cur === 'guest' && <GuestPanel vm={vm} on={on} />}
-        {cur === 'snapshots' && <Snapshots vm={vm} on={on} engines={engines} reload={reload} />}
+        {cur === 'files' && <GuestFiles vm={vm} on={on} />}
+        {cur === 'snapshots' && <Snapshots vm={vm} on={on} reload={reload} />}
         {cur === 'backups' && <Backups vm={vm} on={on} reload={reload} />}
         {cur === 'hardware' && <Hardware vm={vm} on={on} reload={reload} />}
         {cur === 'network' && <NetworkTab vm={vm} on={on} reload={reload} engines={engines} />}
@@ -140,11 +143,15 @@ function Overview({ vm, on, engines, onClone, onRemove, reload, reloadList }) {
   const toggle = (k) => async (v) => { await run(() => put(`/vms/${vm.id}`, { [k]: v })); reload({ silent: true }); };
   const template = () => toggleTemplate(vm, () => { reload({ silent: true }); reloadList(); });
   const ip = ipOf(vm);
+  const hist = useStatsHistory(vm.id, on);
+  const startedAt = on && vm.status ? vm.status.startedAt : null;
+  const cpuHist = hist.map((x) => x.cpu || 0);
+  const memHist = hist.map((x) => x.memory || 0);
   return (
     <div className="grid grid-2">
       <div className="stack">
         <div className="card">
-          <div className="card-head"><Gauge size={16} aria-hidden="true" /><h3>{t('State')}</h3><span className="grow" /></div>
+          <div className="card-head"><Gauge size={16} aria-hidden="true" /><h3>{t('State')}</h3><span className="grow" />{startedAt && <span className="small muted" title={fmtDate(startedAt)}>{t('running for {time}', { time: since(startedAt) })}</span>}</div>
           <div className="card-body stack">
             <div className="svc-meta">
               <div><div className="k">CPU</div><div className="v">{on && stats ? `${Math.round(stats.cpu)} %` : `${vm.cpus} ${t('cores')}`}</div></div>
@@ -152,6 +159,13 @@ function Overview({ vm, on, engines, onClone, onRemove, reload, reloadList }) {
               <div><div className="k">{t('Disks')}</div><div className="v">{gb(used)} / {gb(size)}</div></div>
               <div><div className="k">{t('IP address')}</div><div className="v mono small">{ip || '–'}</div></div>
             </div>
+            {/* the last minutes of this VM's QEMU process, from Hostwerk's own statistics (a point every few seconds) */}
+            {on && hist.length > 1 && (
+              <div className="vm-sparks">
+                <div><div className="tiny muted">{t('CPU – the last minutes')}</div><Sparkline data={cpuHist} width={240} height={40} max={Math.max(100, ...cpuHist)} /></div>
+                <div><div className="tiny muted">{t('Memory – the last minutes')}</div><Sparkline data={memHist} width={240} height={40} color="var(--ok)" max={Math.max(vm.memoryMb * 2 ** 20, ...memHist)} /></div>
+              </div>
+            )}
             {vm.memory && vm.memory.level !== 'ok' && !on && <Callout kind={vm.memory.level === 'err' ? 'err' : 'warn'} dismissible={false}>{t('Together with the running VMs this one needs {total} MB – this PC has {host} MB.', { total: vm.memory.total, host: engines && engines.host ? engines.host.memoryMb : '?' })}</Callout>}
           </div>
         </div>
@@ -186,13 +200,14 @@ function Overview({ vm, on, engines, onClone, onRemove, reload, reloadList }) {
           <div className="card-head"><Settings2 size={16} aria-hidden="true" /><h3>{t('Manage')}</h3><span className="grow" /></div>
           <div className="card-body stack">
             <div className="row-tight vm-manage">
+              <Btn className="sm" icon={PenLine} disabled={!!vm.busy || !!vm.creating} onClick={() => renameVm(vm, () => { reload({ silent: true }); reloadList(); })}>Rename …</Btn>
               <Btn className="sm" icon={Copy} disabled={on} title={on ? t('Shut the VM down first') : t('A full, independent copy.')} onClick={() => onClone(false)}>Copy …</Btn>
               {!vm.template && <Btn className="sm" icon={Layers} disabled={on || !!vm.encryption} title={vm.encryption ? t('Not for encrypted VMs') : t('Shares the disk – fast and small.')} onClick={() => onClone(true)}>Clone …</Btn>}
               <Btn className="sm" icon={Box} disabled={on || !!vm.linkedTo || (!vm.template && !!vm.encryption)} title={vm.template ? t('New VMs start from it as linked clones.') : t('Set up once, then new VMs from it in seconds as linked clones.')} onClick={template}>{vm.template ? t('Normal VM again') : t('Template')}</Btn>
               <ExportButton vm={vm} on={on} />
               {!vm.template && <Btn className="sm" icon={ArrowLeftRight} disabled={on} title={on ? t('Shut the VM down first') : t('Moves the VM with all disks to Hostwerk on another PC.')} onClick={() => moveVm(vm)}>Move to another PC …</Btn>}
             </div>
-            {on && <div className="small muted">{t('Copy, clone, template and export work while the VM is off.')}</div>}
+            {on && <div className="small muted">{t('Copy, clone, template and export work while the VM is off – renaming works any time.')}</div>}
             <div className="small muted">{t('Folder')}{vm.importedFrom ? ` · ${t('taken over from VirtualBox “{name}”', { name: vm.importedFrom.name })}` : ''}</div>
             <code className="mono small vm-code vm-code-wrap">{vm.dir}</code>
             <div className="row"><span className="grow" /><Btn className="sm danger" icon={Trash2} onClick={onRemove}>Delete …</Btn></div>
@@ -202,6 +217,21 @@ function Overview({ vm, on, engines, onClone, onRemove, reload, reloadList }) {
       </div>
     </div>
   );
+}
+
+/** CPU and memory of the VM's QEMU process over the last minutes – Hostwerk keeps them per process (GET /stats/<process>). */
+function useStatsHistory(id, on) {
+  const [hist, setHist] = useState([]);
+  useEffect(() => {
+    setHist([]);
+    if (!on) return undefined;
+    let alive = true;
+    const tick = () => get(`/stats/vm-${id}`).then((r) => { if (alive && Array.isArray(r)) setHist(r); }).catch(() => { /* older Hostwerk: no history – the card stays without the lines */ });
+    tick();
+    const timer = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [id, on]);
+  return hist;
 }
 
 /** App template (#9) and own start script: state of the setup in the guest and the button that opens the app. */
@@ -312,31 +342,40 @@ function SerialConsole({ vm, on }) {
   // in a card like the screen and the commands tab – the three sub-tabs look alike while the VM is off
   if (!on) return <div className="card"><Empty icon={Terminal} title="The VM is off" text="The serial console shows what the VM writes to its first serial port – boot messages and a login on Linux." /></div>;
   const send = async (data) => { try { await post(`/vms/${vm.id}/serial`, { data }); } catch (e) { toast.error(e.message); } };
+  const saveText = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    a.download = `${String(vm.name).replace(/[^\w.\- ]+/g, '_').trim() || vm.id}-serial.txt`;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
   return (
     <div className="card">
+      <div className="card-head"><Terminal size={16} aria-hidden="true" /><h3>{t('Serial console')}</h3><span className="grow" />
+        <div className="row-tight">
+          <Btn className="xs ghost" icon={Copy} disabled={!text} onClick={() => copy(text)}>Copy all</Btn>
+          <Btn className="xs ghost" icon={Download} disabled={!text} onClick={saveText}>Save as file</Btn>
+          <Btn className="xs ghost" icon={Eraser} disabled={!text} title={t('Empties this view – the VM is not touched.')} onClick={() => setText('')}>Clear</Btn>
+        </div>
+      </div>
       <div className="card-body stack">
         <pre ref={box} className="vm-serial mono" aria-live="polite">{text || t('No output yet. Linux cloud images print their boot messages and a login here; press Enter if the screen stays empty.')}</pre>
         <form className="row" onSubmit={(e) => { e.preventDefault(); send(`${line}\r`); setLine(''); }}>
           <input className="input mono grow" value={line} onChange={(e) => setLine(e.target.value)} placeholder={t('Input – Enter sends')} aria-label={t('Serial input')} />
           {/* type="button": inside the form a plain button would also submit the line (input + Enter sent twice) */}
           <Btn className="btn" type="button" onClick={() => send('\r')}>Enter</Btn>
-          <Btn className="btn" type="button" onClick={() => send('\x03')}>Ctrl+C</Btn>
+          <Btn className="btn" type="button" title={t('Stops the running program')} onClick={() => send('\x03')}>Ctrl+C</Btn>
+          <Btn className="btn" type="button" title={t('End of input – signs out of a shell')} onClick={() => send('\x04')}>Ctrl+D</Btn>
         </form>
       </div>
     </div>
   );
 }
 
-function Snapshots({ vm, on, engines, reload }) {
+function Snapshots({ vm, on, reload }) {
   const list = vm.snapshots || [];
-  const ramOk = engines && engines.qemu && engines.qemu.ramSnapshots;
-  const take = async () => {
-    const name = await promptDialog({ title: t('Take a snapshot'), text: on ? (ramOk ? t('The VM keeps running. With memory, restoring continues exactly where it was.') : t('The VM keeps running; the disks are saved at this moment (with the guest agent the file system is frozen briefly).')) : t('Saves the state of all disks.'), label: t('Name'), value: `snap-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}`, confirm: t('Take snapshot'), checkbox: on && ramOk ? { label: t('Include memory'), checked: true } : null });
-    if (!name) return;
-    const value = typeof name === 'object' ? name.value : name;
-    const ram = typeof name === 'object' ? !!name.checked : false;
-    if (await run(() => post(`/vms/${vm.id}/snapshots`, { name: value, ram }), 'Snapshot taken')) reload({ silent: true });
-  };
+  // name, a note what the state is, and the memory where the accelerator can save it (the same dialog as the card's menu)
+  const take = () => takeSnapshot(vm, on, () => reload({ silent: true }));
   const restore = async (s) => {
     if (on && !s.ram) { toast.warn(t('Shut the VM down first to restore a disk snapshot.')); return; }
     if (!(await confirmDialog({ title: t('Restore “{name}”?', { name: s.name }), text: t('Everything that changed since this snapshot is lost (take a snapshot first if unsure).'), confirm: t('Restore'), danger: true }))) return;
@@ -383,11 +422,30 @@ function Snapshots({ vm, on, engines, reload }) {
   );
 }
 
+/*
+ * Graphics cards (server/spec.js VGA_MODELS): what each is good for, and whether it has video memory to set (vram) and
+ * a start resolution it can tell the system (res).
+ */
+const GRAPHICS = [
+  { id: 'std', label: 'Standard (VGA)', text: 'Works with every system – the safe choice.', vram: true, res: true },
+  { id: 'virtio', label: 'virtio', text: 'Fast with Linux; Windows needs the virtio-win drivers.', res: true },
+  { id: 'virtio-gl', label: '3D (virtio with OpenGL, experimental)', text: '3D on this PC’s graphics card – only in the own window; in Hostwerk the screen runs as plain virtio.', res: true },
+  { id: 'qxl', label: 'QXL', text: 'For systems with the QXL driver (Windows guest tools, most Linux desktops) – smooth desktops at high resolutions.', vram: true, res: true },
+  { id: 'vmware', label: 'VMware SVGA', text: 'For systems that bring VMware’s graphics driver, e.g. VMs taken over from VMware.', vram: true },
+  { id: 'cirrus', label: 'Cirrus (old systems)', text: 'For old systems such as Windows 95/98/NT or DOS – up to 1024 × 768.' },
+];
+const RESOLUTIONS = ['1024x768', '1280x720', '1280x800', '1366x768', '1440x900', '1600x900', '1680x1050', '1920x1080', '1920x1200', '2560x1440', '3840x2160'];
+
 function Hardware({ vm, on, reload }) {
-  const [f, setF] = useState({ cpus: vm.cpus, memoryMb: vm.memoryMb, firmware: vm.firmware, vga: vm.vga, display: vm.display, boot: vm.boot, osType: vm.osType, sound: !!vm.sound });
-  useEffect(() => setF({ cpus: vm.cpus, memoryMb: vm.memoryMb, firmware: vm.firmware, vga: vm.vga, display: vm.display, boot: vm.boot, osType: vm.osType, sound: !!vm.sound }), [vm.id, vm.cpus, vm.memoryMb, vm.firmware, vm.vga, vm.display, vm.boot, vm.sound]); // eslint-disable-line react-hooks/exhaustive-deps
+  // what the VM has now, as the form holds it (graphics options are only stored when chosen: none = 0 / '')
+  const stored = { cpus: vm.cpus, memoryMb: vm.memoryMb, firmware: vm.firmware, vga: vm.vga, vramMb: vm.vramMb || 0, resolution: vm.resolution || '', display: vm.display, boot: vm.boot, osType: vm.osType, sound: !!vm.sound };
+  const [f, setF] = useState(stored);
+  useEffect(() => setF(stored), [vm.id, vm.cpus, vm.memoryMb, vm.firmware, vm.vga, vm.vramMb, vm.resolution, vm.display, vm.boot, vm.sound]); // eslint-disable-line react-hooks/exhaustive-deps
   // compare like the form holds it: switches as booleans, number fields as text (an input gives "2048" for 2048)
-  const dirty = Object.keys(f).some((k) => (k === 'sound' ? f.sound !== !!vm.sound : String(f[k]) !== String(vm[k])));
+  const dirty = Object.keys(f).some((k) => (k === 'sound' ? f.sound !== stored.sound : String(f[k]) !== String(stored[k])));
+  const card = GRAPHICS.find((g) => g.id === f.vga) || GRAPHICS[0];
+  // an emptied number field is 0 – nothing to save, and the server would only answer with an error
+  const sizesOk = Number.isInteger(f.cpus) && f.cpus >= 1 && Number.isFinite(f.memoryMb) && f.memoryMb >= 256;
   const save = async () => { if (await run(() => put(`/vms/${vm.id}`, f), 'Saved')) reload({ silent: true }); };
   const setCd = async (iso) => { if (await run(() => put(`/vms/${vm.id}`, { cdrom: iso }), iso ? 'ISO inserted' : 'Ejected')) reload({ silent: true }); };
   const chooseIso = async () => { const p = canPickPath() ? await pickPath({ mode: 'file', title: t('Choose an ISO'), filters: [{ name: 'ISO', extensions: ['iso', 'img'] }] }) : await promptDialog({ title: t('Insert ISO'), label: t('Path'), value: '' }); if (p) setCd(p); };
@@ -412,12 +470,29 @@ function Hardware({ vm, on, reload }) {
     <div className="stack">
       {on && <Callout kind="info" dismissible={false}>{t('CPU, memory, firmware and disks change when the VM is off. The ISO can be changed while it runs.')}</Callout>}
       <div className="card">
-        <div className="card-head"><Cpu size={16} aria-hidden="true" /><h3>{t('System')}</h3><span className="grow" />{dirty && <Btn className="btn primary sm" disabled={off} onClick={save}>Save</Btn>}</div>
+        <div className="card-head"><Cpu size={16} aria-hidden="true" /><h3>{t('System')}</h3><span className="grow" />{dirty && <Btn className="btn primary sm" disabled={off || !sizesOk} title={sizesOk ? undefined : t('At least 1 CPU core and 256 MB of memory.')} onClick={save}>Save</Btn>}</div>
         <div className="card-body grid grid-3">
           <Field label="CPU cores"><input className="input" type="number" min={1} disabled={off} value={f.cpus} onChange={(e) => setF({ ...f, cpus: Number(e.target.value) })} /></Field>
-          <Field label="Memory (MB)"><input className="input" type="number" min={256} step={256} disabled={off} value={f.memoryMb} onChange={(e) => setF({ ...f, memoryMb: Number(e.target.value) })} /></Field>
+          <Field label="Memory (MB)" hint={f.memoryMb >= 1024 ? `= ${mem(f.memoryMb)}` : undefined}><input className="input" type="number" min={256} step={256} disabled={off} value={f.memoryMb} onChange={(e) => setF({ ...f, memoryMb: Number(e.target.value) })} /></Field>
           <Field label="Firmware"><Seg value={f.firmware} onChange={(v) => !off && setF({ ...f, firmware: v })} options={lock([{ id: 'bios', label: 'BIOS' }, { id: 'uefi', label: 'UEFI' }])} /></Field>
-          <Field label="Graphics" hint={f.vga === 'virtio-gl' ? t('3D (experimental) works in the own window only – in Hostwerk the screen uses virtio.') : undefined}><Seg value={f.vga} onChange={(v) => !off && setF({ ...f, vga: v, ...(v === 'virtio-gl' ? { display: 'window' } : {}) })} options={lock([{ id: 'std', label: t('Standard') }, { id: 'virtio', label: 'virtio' }, { id: 'virtio-gl', label: t('3D (experimental)') }])} /></Field>
+          <Field label="Graphics card" hint={t(card.text)}>
+            <select className="select" disabled={off} value={f.vga} onChange={(e) => { const v = e.target.value; const g = GRAPHICS.find((x) => x.id === v); setF({ ...f, vga: v, ...(v === 'virtio-gl' ? { display: 'window' } : {}), ...(g.vram ? {} : { vramMb: 0 }), ...(g.res ? {} : { resolution: '' }) }); }}>
+              {GRAPHICS.filter((g) => vm.arch !== 'aarch64' || g.id === 'virtio').map((g) => <option key={g.id} value={g.id}>{t(g.label)}</option>)}
+            </select>
+          </Field>
+          <Field label="Start resolution" hint={card.res ? 'The size the screen starts in – the system can still change it.' : 'This card takes its size from the system in the VM.'}>
+            <select className="select" disabled={off || !card.res} value={f.resolution} onChange={(e) => setF({ ...f, resolution: e.target.value })}>
+              <option value="">{t('Automatic')}</option>
+              {RESOLUTIONS.map((r) => <option key={r} value={r}>{r.replace('x', ' × ')}</option>)}
+              {f.resolution && !RESOLUTIONS.includes(f.resolution) && <option value={f.resolution}>{f.resolution.replace('x', ' × ')}</option>}
+            </select>
+          </Field>
+          <Field label="Video memory" hint={card.vram ? 'More helps with high resolutions and several screens.' : 'This card manages its memory itself.'}>
+            <select className="select" disabled={off || !card.vram} value={f.vramMb} onChange={(e) => setF({ ...f, vramMb: Number(e.target.value) })}>
+              <option value={0}>{t('Standard (16 MB)')}</option>
+              {[32, 64, 128, 256].map((n) => <option key={n} value={n}>{n} MB</option>)}
+            </select>
+          </Field>
           <Field label="Sound" hint="Plays on this PC’s speakers."><label className="row"><Switch checked={f.sound} disabled={off} onChange={(v) => setF({ ...f, sound: v })} /> <span>{f.sound ? t('On') : t('Off')}</span></label></Field>
           <Field label="Screen" hint="In Hostwerk, or as a separate window on this PC (smoother for desktops)."><Seg value={f.display} onChange={(v) => !off && setF({ ...f, display: v })} options={lock([{ id: 'web', label: t('In Hostwerk') }, { id: 'window', label: t('Own window') }])} /></Field>
           <Field label="Boot from"><Seg value={f.boot} onChange={(v) => !off && setF({ ...f, boot: v })} options={lock([{ id: 'disk', label: t('Disk') }, { id: 'cdrom', label: 'ISO' }])} /></Field>
@@ -548,18 +623,31 @@ function Limits({ vm, reload }) {
   );
 }
 
+/** Commands typed on the "Commands in the VM" tab, per VM – kept while the page is open, never stored. */
+const cmdHistory = new Map();
 /** What runs inside the VM: disks, update, a command – all through the guest agent. */
 function GuestPanel({ vm, on }) {
   const agent = vm.status && vm.status.agent;
   const [cmd, setCmd] = useState('');
   const [out, setOut] = useState(null);
   const [busy, setBusy] = useState(false);
+  // the commands of this visit, newest last – arrow up/down in the field brings them back like in a shell
+  const [at, setAt] = useState(-1);
+  const past = cmdHistory.get(vm.id) || [];
+  const recall = (e) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    if (!past.length) return;
+    e.preventDefault();
+    const next = e.key === 'ArrowUp' ? (at < 0 ? past.length - 1 : Math.max(0, at - 1)) : (at < 0 || at >= past.length - 1 ? -1 : at + 1);
+    setAt(next); setCmd(next < 0 ? '' : past[next]);
+  };
   // the sub-tab must not stay blank: say why there is nothing to run yet
   if (!on) return <div className="card"><Empty icon={SquareTerminal} title="The VM is off" text="Commands, system updates and the disk usage inside the VM work through the guest agent while the VM runs." /></div>;
   if (!agent || !agent.ok) return <div className="card"><Empty icon={SquareTerminal} title="Waiting for the guest agent …" text="Commands in the VM need the guest agent (qemu-guest-agent). Ready-made Linux VMs bring it along; on Windows install it from the virtio-win ISO." /></div>;
   const exec = async (e) => {
     e.preventDefault();
     if (!cmd.trim()) return;
+    cmdHistory.set(vm.id, [...past.filter((x) => x !== cmd), cmd].slice(-50)); setAt(-1);
     setBusy(true);
     try { const r = await post(`/vms/${vm.id}/guest/exec`, { command: cmd }); setOut(r); } catch (err) { toast.error(err.message); } finally { setBusy(false); }
   };
@@ -571,7 +659,7 @@ function GuestPanel({ vm, on }) {
   const trim = async () => { const r = await run(() => post(`/vms/${vm.id}/guest/trim`)); if (r) toast.success(t('Unused blocks freed – compact the disk after shutting down to give the space back.')); };
   return (
     <div className="card">
-      <div className="card-head"><Info size={16} aria-hidden="true" /><h3>{t('Inside the VM')}</h3><span className="grow" /><div className="row-tight"><Btn className="btn sm" onClick={trim}>Free unused blocks</Btn><Btn className="btn sm primary" icon={Download} onClick={update}>Update system …</Btn></div></div>
+      <div className="card-head"><Info size={16} aria-hidden="true" /><h3>{t('Inside the VM')}</h3><span className="grow" /><div className="row-tight"><Btn className="btn sm" icon={KeyRound} title={t('Sets a new password for a user of the VM – for a VM you are locked out of.')} onClick={() => resetPassword(vm)}>New password …</Btn><Btn className="btn sm" onClick={trim}>Free unused blocks</Btn><Btn className="btn sm primary" icon={Download} onClick={update}>Update system …</Btn></div></div>
       <div className="card-body stack">
         {(agent.fs || []).map((f) => (
           <div key={f.mount} className="stack vm-fs">
@@ -580,10 +668,17 @@ function GuestPanel({ vm, on }) {
           </div>
         ))}
         <form className="row" onSubmit={exec}>
-          <input className="input mono grow" value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder={vm.osType === 'windows' ? 'Get-Process | Select -First 5' : 'df -h; uptime'} aria-label={t('Command in the VM')} />
+          <input className="input mono grow" value={cmd} onChange={(e) => { setCmd(e.target.value); setAt(-1); }} onKeyDown={recall} placeholder={vm.osType === 'windows' ? 'Get-Process | Select -First 5' : 'df -h; uptime'} aria-label={t('Command in the VM')} title={past.length ? t('Arrow up brings back earlier commands') : undefined} />
           <Btn className="btn" busy={busy} disabled={!cmd.trim()} type="submit">Run</Btn>
         </form>
-        {out && <pre className="vm-serial mono vm-exec">{out.timedOut ? t('No answer within the time limit – the command may still be running.') : `${out.out}${out.err ? `\n${out.err}` : ''}\n[${t('exit code {code}', { code: out.code })}]`}</pre>}
+        {out && <>
+          <pre className="vm-serial mono vm-exec">{out.timedOut ? t('No answer within the time limit – the command may still be running.') : `${out.out}${out.err ? `\n${out.err}` : ''}`}</pre>
+          {!out.timedOut && <div className="row-tight small">
+            <span className={`badge ${out.code === 0 ? 'ok' : 'err'}`}>{t('exit code {code}', { code: out.code })}</span>
+            <span className="grow" />
+            <Btn className="xs ghost" icon={Copy} disabled={!out.out && !out.err} onClick={() => copy(`${out.out}${out.err ? `\n${out.err}` : ''}`)}>Copy output</Btn>
+          </div>}
+        </>}
       </div>
     </div>
   );
@@ -732,12 +827,16 @@ function NetMode({ vm, on, reload }) {
   );
 }
 
+/** Ports in the VM that usually speak HTTP(S) – their forwarding gets an “Open” button. */
+const WEB_PORTS = [80, 443, 3000, 3001, 5000, 8000, 8080, 8443, 9000];
 function NetworkTab({ vm, on, reload, engines }) {
   const [add, setAdd] = useState(null);
   const lan = engines && engines.config && engines.config.lanForwards;
   const forwards = (vm.net && vm.net.forwards) || [];
   const save = async (list) => { if (await run(() => put(`/vms/${vm.id}`, { net: { forwards: list } }), on ? 'Changed while running' : 'Saved')) { reload({ silent: true }); return true; } return false; };
   const model = async (m) => { if (await run(() => put(`/vms/${vm.id}`, { net: { model: m } }))) reload({ silent: true }); };
+  // a preset proposes the usual port on this PC – the next one up when this VM already forwards from it
+  const freeHost = (h) => { let p = h; while (forwards.some((x) => x.host === p)) p++; return p; };
   return (
     <div className="stack">
       <NetMode vm={vm} on={on} reload={reload} />
@@ -752,7 +851,8 @@ function NetworkTab({ vm, on, reload, engines }) {
               <div key={`${f.proto}${f.host}`} className="list-row-item">
                 <Network size={16} aria-hidden="true" />
                 <div className="grow"><div className="list-row-title">{f.label || `${f.guest}`} <span className="badge">{f.proto.toUpperCase()}</span>{f.bind === 'lan' && <span className="badge warn">{t('home network')}</span>}</div><div className="list-row-sub small mono">{f.bind === 'lan' ? '0.0.0.0' : '127.0.0.1'}:{f.host} → VM:{f.guest}</div></div>
-                {f.proto === 'tcp' && [80, 8080, 443, 3000, 8000].includes(f.guest) && <Btn className="btn xs" onClick={() => window.open(`${f.guest === 443 ? 'https' : 'http'}://127.0.0.1:${f.host}/`, '_blank', 'noopener')}>Open</Btn>}
+                {f.proto === 'tcp' && WEB_PORTS.includes(f.guest) && <Btn className="btn xs" icon={ExternalLink} disabled={!on} title={on ? undefined : t('Start the VM first')} onClick={() => openExternal(`${[443, 8443].includes(f.guest) ? 'https' : 'http'}://127.0.0.1:${f.host}/`)}>Open</Btn>}
+                <Btn className="btn xs ghost" icon={Copy} title={t('Copy the address on this PC')} aria-label={t('Copy the address on this PC')} onClick={() => copy(`127.0.0.1:${f.host}`)} />
                 <Btn className="btn xs ghost" icon={Trash2} aria-label={t('Remove')} onClick={() => save(forwards.filter((x) => x !== f))} />
               </div>
             ))}
@@ -770,7 +870,7 @@ function NetworkTab({ vm, on, reload, engines }) {
       {add && (
         <Modal title="Add port forwarding" onClose={() => setAdd(null)} footer={<><div className="grow" /><Btn className="btn" onClick={() => setAdd(null)}>Cancel</Btn><Btn className="btn primary" disabled={!add.host || !add.guest} onClick={async () => { if (await save([...forwards, { ...add, host: Number(add.host), guest: Number(add.guest) }])) setAdd(null); }}>Add</Btn></>}>
           <div className="stack">
-            <div className="row-tight">{[['SSH', 22, 2222], ['HTTP', 80, 8080], ['HTTPS', 443, 8443], ['RDP', 3389, 13389]].map(([l, g, h]) => <Btn key={l} className="btn xs" onClick={() => setAdd({ ...add, label: l, guest: g, host: h + (forwards.length ? forwards.length : 0) })}>{l}</Btn>)}</div>
+            <div className="row-tight">{[['SSH', 22, 2222], ['HTTP', 80, 8080], ['HTTPS', 443, 8443], ['RDP', 3389, 13389]].map(([l, g, h]) => <Btn key={l} className="btn xs" onClick={() => setAdd({ ...add, label: l, guest: g, host: freeHost(h) })}>{l}</Btn>)}</div>
             <div className="grid grid-3">
               <Field label="Name"><input className="input" value={add.label} onChange={(e) => setAdd({ ...add, label: e.target.value })} /></Field>
               <Field label="Port in the VM"><input className="input" type="number" value={add.guest} onChange={(e) => setAdd({ ...add, guest: e.target.value })} /></Field>
@@ -809,7 +909,7 @@ function Backups({ vm, on, reload }) {
             <div key={b.file} className="list-row-item">
               <Archive size={16} aria-hidden="true" />
               <div className="grow"><div className="list-row-title">{fmtDate(b.time)} {b.live && <span className="badge">{t('while running')}</span>}</div><div className="list-row-sub small muted">{[b.label, gb(b.size)].filter(Boolean).join(' · ')}</div></div>
-              <Btn className="btn xs" icon={Download} disabled={on} onClick={() => restore(b)}>Restore</Btn>
+              <Btn className="btn xs" icon={Download} disabled={on} title={on ? t('Shut the VM down first') : undefined} onClick={() => restore(b)}>Restore</Btn>
               <Btn className="btn xs ghost" icon={Trash2} aria-label={t('Delete')} onClick={() => remove(b)} />
             </div>
           ))}
