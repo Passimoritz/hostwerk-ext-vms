@@ -13,7 +13,11 @@ Virtuelle Maschinen wie mit VirtualBox – nur einfacher und schneller: fertige 
 - **Bildschirm in Hostwerk** – Maus und Tastatur (jede Taste geht an die VM, im Vollbild auch Alt+Tab und die Windows-Taste; die rechte Strg-Taste gibt die Tastatur zurück), ein Menü für Strg+Alt+Entf und andere Tasten, die dieser PC für sich behält, eine gemeinsame Zwischenablage in beide Richtungen (Strg+C / Strg+V), Bildschirmfoto, Vollbild; oder ein eigenes Fenster auf diesem PC; dazu die serielle Konsole
 - **Snapshots auch im laufenden Betrieb** – Platten-Snapshots laufender VMs (mit eingefrorenem Dateisystem über den Gast-Agenten), mit Arbeitsspeicher, wo der Beschleuniger es erlaubt
 - **Vorlagen und verknüpfte Klone** – eine VM zur Vorlage machen und daraus in Sekunden neue VMs anlegen
-- **Import** – VirtualBox-VMs (mit CPU, RAM und Platten übernommen), OVA/OVF, VDI, VMDK, VHD(X), qcow2 und Rohabbilder; Export als VDI, VMDK, VHDX oder qcow2
+- **Import und Export** – VirtualBox-VMs (mit CPU, RAM und Platten übernommen), OVA/OVF, VDI, VMDK, VHD(X), qcow2 und Rohabbilder; Export der ganzen VM als eine Appliance-Datei (OVA, für VirtualBox, VMware, Proxmox) oder einer einzelnen Platte als VDI, VMDK, VHDX, VHD oder qcow2
+- **Dateien in der VM** – ein Dateibrowser für die laufende VM über den Gast-Agenten: Ordner durchblättern, herunterladen, in den offenen Ordner hochladen (Knopf oder Ziehen), Ordner anlegen, löschen – ohne Netzwerkfreigabe oder SSH
+- **Neues Passwort** – das Passwort eines Benutzers in der laufenden VM über den Gast-Agenten setzen, für eine VM, aus der man ausgesperrt ist
+- **Grafik** – Standard, virtio, QXL, VMware SVGA, Cirrus für alte Systeme und 3D (virgl, im eigenen Fenster); Startauflösung und Videospeicher, wo die Karte das kann
+- **Übersicht** – Suche, Filter und Sortierung bei vielen VMs, Auslastung laufender VMs auf der Karte, CPU und Arbeitsspeicher der letzten Minuten, Umbenennen, Notizen an Snapshots
 - **Netzwerk** – SSH-Weiterleitung automatisch, weitere Portweiterleitungen live im laufenden Betrieb, IP-Adressen über den Gast-Agenten
 - **Ganz Hostwerk** – Übersicht, Suche, Start/Stopp, Aufgaben, Sicherungen in der Sicherungs-Zentrale, Autostart, Neustart nach Absturz, CPU-/RAM-Verlauf
 - **VirtualBox im Blick** – vorhandene VirtualBox-VMs starten, stoppen, Snapshots und Bildschirmfoto
@@ -57,7 +61,13 @@ Header `x-hostwerk-key`): `POST /api/vms/<id>/guest/exec` `{ "command": "…", "
 Gast-Agenten), `GET|POST /api/vms/<id>/serial`, `GET /api/vms/<id>/screen` (PNG), `POST /api/vms/<id>/type`
 `{ "text": "…" }`, `POST /api/vms/<id>/combo` `{ "combo": "ctrl-alt-del" }` oder `{ "keys": ["ctrl", "alt", "t"] }`,
 `GET /api/vms/<id>/clipboard?watch=1` (in der VM kopierter Text) und `POST /api/vms/<id>/clipboard` `{ "text": "…" }` (spice-vdagent in der VM, oder unter Linux der Gast-Agent mit wl-clipboard/Klipper/xclip), `…/restart`, `…/stop`, `…/reset`,
-`GET /api/vms/<id>/guest/download?path=…` und `POST /api/vms/<id>/guest/upload?name=…` (die Datei als Request-Body).
+`GET /api/vms/<id>/guest/download?path=…` und `POST /api/vms/<id>/guest/upload?name=…` (die Datei als Request-Body; mit
+`&dir=…` in diesen Ordner der VM). Dateien und Benutzer in der VM: `GET /api/vms/<id>/guest/files?path=…` (ein Ordner;
+ohne `path` das Home des VM-Benutzers), `POST …/guest/files/mkdir` `{ "path": "…", "name": "…" }`,
+`POST …/guest/files/delete` `{ "path": "…" }`, `GET …/guest/users` und `POST …/guest/password`
+`{ "user": "…", "password": "…" }`. Export bei ausgeschalteter VM: `POST /api/vms/<id>/export-ova`
+`{ "dest": "…\\vm.ova" }` (die ganze VM) oder `POST /api/vms/<id>/export` `{ "disk": "disk0", "format": "vdi", "dest": "…" }`
+(eine Platte) – beide antworten mit einem Job.
 
 Oberfläche in `ui/src`, Server-Teil in `server/`. Texte im Code sind Englisch, Deutsch steht in `locales/de.json`.
 

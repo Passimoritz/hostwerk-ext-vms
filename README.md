@@ -13,7 +13,11 @@ Virtual machines like VirtualBox – only simpler and faster: ready-made Linux V
 - **Screen inside Hostwerk** – mouse and keyboard (every key goes to the VM, in full screen also Alt+Tab and the Windows key; Right Ctrl gives the keyboard back), a shortcuts menu for Ctrl+Alt+Del and other keys this PC keeps, a shared clipboard both ways (Ctrl+C / Ctrl+V), screenshot, full screen; or a separate window on this PC; plus the serial console
 - **Snapshots even while running** – disk snapshots of running VMs (with a frozen file system through the guest agent), with RAM where the accelerator allows it
 - **Templates and linked clones** – turn a VM into a template and create new VMs from it in seconds
-- **Import** – VirtualBox VMs (taken over with CPU, RAM and disks), OVA/OVF, VDI, VMDK, VHD(X), qcow2 and raw images; export as VDI, VMDK, VHDX or qcow2
+- **Import and export** – VirtualBox VMs (taken over with CPU, RAM and disks), OVA/OVF, VDI, VMDK, VHD(X), qcow2 and raw images; export the whole VM as one appliance file (OVA, for VirtualBox, VMware, Proxmox) or a single disk as VDI, VMDK, VHDX, VHD or qcow2
+- **Files in the VM** – a file browser for the running VM through the guest agent: walk through the folders, download, upload into the open folder (button or drag & drop), make folders, delete – no network share or SSH needed
+- **New password** – set the password of a user inside the running VM through the guest agent, for a VM you are locked out of
+- **Graphics** – Standard, virtio, QXL, VMware SVGA, Cirrus for old systems and 3D (virgl, in an own window); start resolution and video memory where the card has them
+- **Overview** – search, filter and order for many VMs, the load of running VMs on their cards, CPU and memory of the last minutes, rename, notes on snapshots
 - **Network** – SSH forwarding set up automatically, more port forwards added live while the VM runs, IP addresses through the guest agent
 - **Hostwerk all the way** – overview, search, start/stop, scheduled tasks, backups in the backup centre, autostart, crash restart, CPU/RAM graphs
 - **VirtualBox at a glance** – start, stop, snapshots and screenshot of existing VirtualBox VMs
@@ -56,7 +60,12 @@ there. Use Hostwerk's API instead (same login as the page, e.g. the header `x-ho
 `GET|POST /api/vms/<id>/serial`, `GET /api/vms/<id>/screen` (PNG), `POST /api/vms/<id>/type` `{ "text": "…" }`,
 `POST /api/vms/<id>/combo` `{ "combo": "ctrl-alt-del" }` or `{ "keys": ["ctrl", "alt", "t"] }`,
 `GET /api/vms/<id>/clipboard?watch=1` (text copied in the VM) and `POST /api/vms/<id>/clipboard` `{ "text": "…" }` (spice-vdagent in the VM, or on Linux the guest agent with wl-clipboard/Klipper/xclip), `…/restart`, `…/stop`, `…/reset`, `GET /api/vms/<id>/guest/download?path=…` and
-`POST /api/vms/<id>/guest/upload?name=…` (the file as the request body).
+`POST /api/vms/<id>/guest/upload?name=…` (the file as the request body; with `&dir=…` into that folder of the VM).
+Files and users in the VM: `GET /api/vms/<id>/guest/files?path=…` (one folder; without `path` the home of the VM's
+user), `POST …/guest/files/mkdir` `{ "path": "…", "name": "…" }`, `POST …/guest/files/delete` `{ "path": "…" }`,
+`GET …/guest/users` and `POST …/guest/password` `{ "user": "…", "password": "…" }`. Export while the VM is off:
+`POST /api/vms/<id>/export-ova` `{ "dest": "…\\vm.ova" }` (the whole VM) or `POST /api/vms/<id>/export`
+`{ "disk": "disk0", "format": "vdi", "dest": "…" }` (one disk) – both answer with a job.
 
 Interface source in `ui/src`, server part in `server/`. Texts in the code are English, German is in `locales/de.json`.
 
